@@ -1,0 +1,18 @@
+# Core DL & GNN libraries
+torch
+torch_geometric
+
+# PyG dependencies
+# Note: You might need to install the specific wheels for these 
+# compatible with your CUDA version and Torch version.
+# See: https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html
+torch_scatter
+torch_sparse
+
+# Scientific Computing
+numpy
+scipy
+
+# Visualization & Graphs
+matplotlib
+networkx

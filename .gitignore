@@ -1,0 +1,20 @@
+# Python standard
+__pycache__/
+*.pyc
+
+# Virtual Environments
+.venv/
+env/
+venv/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Data
+/data/
+/Cora/
+/tmp/
+
+# System files
+.DS_Store
+Thumbs.db
