@@ -1,20 +1,32 @@
-# Python standard
-__pycache__/
-*.pyc
+# --- Data ---
+# Ignore data folder where datasets (Cora, PubMed) are downloaded
+data/
+raw/
+processed/
 
-# Virtual Environments
-.venv/
-env/
-venv/
-
-# Jupyter Notebooks
-.ipynb_checkpoints/
-
-# Data
-/data/
-/Cora/
-/tmp/
-
-# System files
+# --- System Files ---
 .DS_Store
 Thumbs.db
+.directory
+
+# --- Python & Environments ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+profile_default/
+ipython_config.py
+
+# --- IDE Settings ---
+.vscode/
+.idea/
