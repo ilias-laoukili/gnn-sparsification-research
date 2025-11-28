@@ -1,0 +1,13 @@
+# Cora Dataset Configuration
+
+name: cora
+dataset_class: Planetoid
+
+# Dataset parameters
+split: public  # or 'full', 'random'
+transform: null
+
+# Dataset-specific info (for reference)
+num_classes: 7
+num_features: 1433
+num_nodes: 2708

@@ -1,0 +1,15 @@
+# Baseline Experiment: GCN on Cora with Random Sparsification
+
+# @package _global_
+
+defaults:
+  - override /dataset: cora
+  - override /model: gcn
+  - override /sparsifier: random
+
+experiment:
+  name: baseline_gcn_cora_random
+  description: "Baseline experiment with GCN on Cora dataset using random sparsification"
+
+sparsifier:
+  sparsification_ratio: 0.5

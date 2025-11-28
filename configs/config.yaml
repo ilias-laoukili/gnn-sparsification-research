@@ -1,0 +1,47 @@
+# Main Configuration File for GNN Sparsification Experiments
+# This is the entry point for Hydra configuration composition
+
+defaults:
+  - dataset: cora
+  - model: gcn
+  - sparsifier: random
+  - _self_
+
+# Experiment metadata
+experiment:
+  name: baseline_experiment
+  seed: 42
+  device: cuda  # or cpu
+
+# Training hyperparameters
+training:
+  epochs: 200
+  learning_rate: 0.01
+  weight_decay: 5.0e-4
+  patience: 50  # Early stopping patience
+  monitor: val_acc  # Metric to monitor for early stopping
+
+# Logging and outputs
+logging:
+  use_wandb: true
+  wandb_project: gnn-sparsification
+  wandb_entity: null  # Set to your W&B username/team
+  log_interval: 10  # Log every N epochs
+  save_checkpoints: true
+  checkpoint_dir: outputs/checkpoints
+
+# Data processing
+data:
+  root_dir: data/
+  cache_processed: true
+  num_workers: 4
+
+# Output directories
+paths:
+  output_dir: outputs/
+  logs_dir: outputs/logs/
+  results_dir: outputs/results/
+
+# Reproducibility
+seed: ${experiment.seed}
+deterministic: true

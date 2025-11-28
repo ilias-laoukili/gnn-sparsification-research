@@ -1,0 +1,12 @@
+# Spectral Sparsification Configuration
+
+name: spectral
+class: SpectralSparsifier
+
+# Sparsification parameters
+sparsification_ratio: 0.5  # Keep 50% of edges
+preserve_node_features: true
+method: effective_resistance  # Spectral method to use
+
+# Optional parameters
+description: "Spectral sparsification preserving graph properties"

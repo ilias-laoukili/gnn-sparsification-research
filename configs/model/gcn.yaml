@@ -1,0 +1,13 @@
+# GCN Model Configuration
+
+name: gcn
+
+architecture:
+  hidden_dim: 64
+  num_layers: 2
+  dropout: 0.5
+  activation: relu
+
+# Model-specific hyperparameters
+normalize: true
+add_self_loops: true

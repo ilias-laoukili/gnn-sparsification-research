@@ -1,0 +1,15 @@
+# Jaccard Sparsification Experiment
+
+# @package _global_
+
+defaults:
+  - override /dataset: cora
+  - override /model: gcn
+  - override /sparsifier: jaccard
+
+experiment:
+  name: jaccard_gcn_cora
+  description: "GCN on Cora with Jaccard similarity sparsification"
+
+sparsifier:
+  sparsification_ratio: 0.5

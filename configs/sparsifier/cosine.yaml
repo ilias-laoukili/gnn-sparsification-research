@@ -1,0 +1,13 @@
+# Cosine Similarity Sparsification Configuration
+
+name: cosine
+class: MetricSparsifier
+
+# Sparsification parameters
+sparsification_ratio: 0.5  # Keep 50% of edges
+preserve_node_features: true
+metric: cosine
+threshold: null  # Use ratio instead of threshold
+
+# Optional parameters
+description: "Cosine similarity based sparsification"

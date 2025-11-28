@@ -1,0 +1,15 @@
+# GAT Model Configuration
+
+name: gat
+
+architecture:
+  hidden_dim: 64
+  num_layers: 2
+  heads: 8  # Number of attention heads
+  output_heads: 1  # Heads in the output layer
+  dropout: 0.6
+  activation: elu
+  concat: true  # Whether to concatenate or average attention heads
+
+# Model-specific hyperparameters
+add_self_loops: true

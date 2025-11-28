@@ -1,0 +1,13 @@
+# PubMed Dataset Configuration
+
+name: pubmed
+dataset_class: Planetoid
+
+# Dataset parameters
+split: public
+transform: null
+
+# Dataset-specific info (for reference)
+num_classes: 3
+num_features: 500
+num_nodes: 19717

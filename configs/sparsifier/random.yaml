@@ -1,0 +1,12 @@
+# Random Sparsification Configuration
+
+name: random
+class: RandomSparsifier
+
+# Sparsification parameters
+sparsification_ratio: 0.5  # Keep 50% of edges
+preserve_node_features: true
+seed: 42  # For reproducibility
+
+# Optional parameters
+description: "Baseline random edge removal"

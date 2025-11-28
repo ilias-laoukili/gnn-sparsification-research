@@ -1,0 +1,13 @@
+# Jaccard Metric Sparsification Configuration
+
+name: jaccard
+class: MetricSparsifier
+
+# Sparsification parameters
+sparsification_ratio: 0.5  # Keep 50% of edges
+preserve_node_features: true
+metric: jaccard
+threshold: null  # Use ratio instead of threshold
+
+# Optional parameters
+description: "Jaccard similarity based sparsification"
