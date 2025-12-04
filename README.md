@@ -3,6 +3,9 @@
 ![Status](https://img.shields.io/badge/Status-In%20Development-blue)
 ![Python](https://img.shields.io/badge/Python-3.8%2B-green)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red)
+![License](https://img.shields.io/badge/License-MIT%20%2B%20CC--BY-lightgrey)
+
+> **⚠️ Note:** The core research logic and results are fully functional in the `notebooks/exploratory/` directory. The modular package structure (`src/` and `scripts/`) is currently under active refactoring to support MLOps standards. **Please refer to the notebooks for reproducible results.**
 
 ## Introduction
 
@@ -10,221 +13,124 @@ This repository contains the research work for the **Projet TREMPLIN RECHERCHE 2
 
 **Tutor:** Maximilien Dreveton
 
-The primary goal of this project is to investigate the trade-off between Graph Neural Network (GNN) performance and computational efficiency by sparsifying graphs using various methods including metric backbones. We aim to reduce the number of edges in the graph while maintaining high classification accuracy.
+The primary goal of this project is to investigate the trade-off between Graph Neural Network (GNN) performance and computational efficiency by sparsifying graphs using various methods, specifically focusing on **Metric Backbones**. We aim to reduce the number of edges in the graph (compression) while maintaining high classification accuracy (performance).
 
 ## 🎯 Research Objectives
 
-- **Compare** different graph sparsification methods (Random, Spectral, Metric-based)
-- **Analyze** the impact of sparsification on GNN accuracy and training time
-- **Identify** optimal sparsification ratios for different datasets
-- **Understand** which graph properties are most important to preserve
+- **Compare** different graph sparsification methods (Metric-based vs. Random baseline).
+- **Analyze** the impact of sparsification on GNN accuracy and training time.
+- **Identify** optimal sparsification ratios for different datasets (Citation vs. Social).
+- **Understand** the topological properties preserved by different metrics (Jaccard vs. Adamic-Adar).
 
 ## 📐 Methodology
 
-We investigate multiple sparsification approaches:
+We investigate multiple sparsification approaches based on the **Metric Backbone** framework (Relaxed Triangle Inequality):
 
-### 1. Metric Backbone (Jaccard-based)
+### 1. Jaccard Metric Backbone
+Used for citation networks (homophily-based). Edge weights are based on neighborhood overlap:
+$$d(u,v) = 1 - \frac{|N(u) \cap N(v)|}{|N(u) \cup N(v)|}$$
 
-Edge weights based on the Jaccard Distance of node neighborhoods:
-
-$$ d(u,v) = 1 - \frac{|N(u) \cap N(v)|}{|N(u) \cup N(v)|} $$
-
-Edges that don't preserve shortest path metrics are removed.
-
-### 2. Spectral Methods
-
-Preserve spectral properties of the graph Laplacian (under development).
+### 2. Adamic-Adar Metric Backbone
+Used for social networks. Weights common neighbors by their rarity (inverse log degree):
+$$AA(u,v) = \sum_{z \in N(u) \cap N(v)} \frac{1}{\log(|N(z)|)}$$
 
 ### 3. Random Baseline
-
-Random edge removal for comparison baseline.
+Random edge removal to establish a performance lower bound.
 
 ## 🏗️ Project Structure
 
-```
+```text
 gnn-sparsification-research/
-├── configs/              # Hydra configuration files
-│   ├── experiment/       # Experiment presets
-│   ├── model/            # Model configs (GCN, GAT)
-│   ├── dataset/          # Dataset configs (Cora, PubMed)
-│   └── sparsifier/       # Sparsification methods
-├── src/                  # Main source code
-│   ├── sparsification/   # Core sparsification module
-│   ├── models/           # GNN implementations
-│   ├── data/             # Data loading utilities
-│   ├── training/         # Training loops
-│   └── utils/            # Metrics and utilities
-├── scripts/              # Entry point scripts
-│   ├── train.py          # Main training script
-│   ├── demo_sparsification.py
-│   └── verify_setup.py
-├── notebooks/            # Jupyter notebooks
-│   ├── exploratory/      # Research experiments
-│   └── tutorials/        # Learning materials
-├── tests/                # Unit tests
-└── docs/                 # Documentation
+├── notebooks/
+│   └── exploratory/      # ✅ CORE RESEARCH EXPERIMENTS
+│       ├── 01_exp_jaccard_sparsification_cora.ipynb
+│       ├── 02_exp_jaccard_sparsification_pubmed.ipynb
+│       └── 03_exp_adamic_adar_sparsification_flickr.ipynb
+├── src/                  # (In Progress) Modular source code
+├── scripts/              # (In Progress) Training scripts
+├── configs/              # (In Progress) Hydra configs
+├── docs/                 # Documentation & Reports
+└── tests/                # Unit tests
 ```
 
-## 🚀 Quick Start
+## 🚀 Reproducing Research Results
 
-### 1. Setup
+The research experiments are available as standalone Jupyter Notebooks. To replicate the findings:
+
+### 1. Setup Environment
 
 ```bash
-# Clone the repository
-git clone https://github.com/ilias-laoukili/gnn-sparsification-research.git
-cd gnn-sparsification-research
-
-# Run automated setup
-./setup.sh
-
-# Or manually:
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Install dependencies
 pip install -r requirements.txt
-pip install -e .
 ```
 
-### 2. Verify Installation
+### 2. Run Experiments
+
+Launch Jupyter Lab or Notebook:
 
 ```bash
-python scripts/verify_setup.py
+jupyter notebook notebooks/exploratory/
 ```
 
-### 3. Test Sparsification Methods
+#### **Experiment 1: Small Scale Baseline (Cora)**
 
-```bash
-# Run demonstration
-python scripts/demo_sparsification.py
+- **Notebook:** `01_exp_jaccard_sparsification_cora.ipynb`
+- **Method:** Jaccard Metric Backbone (Dense Matrix Implementation).
+- **Finding:** High compressibility. We can remove **~40%** of edges with negligible accuracy loss.
 
-# Run unit tests
-pytest tests/
-```
+#### **Experiment 2: Scalability & Saturation (PubMed)**
 
-### 4. Run Experiments (TODO: Complete model implementations first)
+- **Notebook:** `02_exp_jaccard_sparsification_pubmed.ipynb`
+- **Method:** Sparse Tensor Algebra ($O(E)$ complexity).
+- **Finding:** Discovery of the **"Saturation Effect"**. Edge retention stabilizes at **~65%** regardless of the stretch factor $\alpha$, suggesting a rigid topological "Hard Core" in citation graphs.
 
-```bash
-# Run with default configuration
-python scripts/train.py
+#### **Experiment 3: Social Networks & Optimization (Flickr)**
 
-# Override components
-python scripts/train.py model=gat dataset=pubmed sparsifier=jaccard
+- **Notebook:** `03_exp_adamic_adar_sparsification_flickr.ipynb`
+- **Method:** Adamic-Adar Metric Backbone.
+- **Engineering:** Achieved **1000x speedup** in metric computation using CPU-vectorized sparse operations (`scipy.sparse`) to enable processing 900k edges on consumer hardware (Mac M4) without OOM.
 
-# Use experiment preset
-python scripts/train.py experiment=baseline
+## 📊 Key Research Findings
 
-# Adjust parameters
-python scripts/train.py sparsifier.sparsification_ratio=0.3 training.learning_rate=0.001
-```
-
-### 5. Using Makefile
-
-```bash
-make help       # Show available commands
-make test       # Run tests
-make format     # Format code
-make train      # Run training
-```
-
-## 📚 Documentation
-
-- **[Quick Start Guide](docs/QUICKSTART.md)** - Get up and running quickly
-- **[Migration Guide](docs/MIGRATION.md)** - Understand the refactoring
-- **[Architecture](docs/ARCHITECTURE.md)** - Deep dive into system design
-- **[Refactoring Summary](REFACTORING_SUMMARY.md)** - Complete refactoring details
-
-## 🧪 Tech Stack
-
-- **Language:** Python 3.8+
-- **Deep Learning:** PyTorch 2.0+, PyTorch Geometric
-- **Configuration:** Hydra, OmegaConf
-- **Experiment Tracking:** Weights & Biases
-- **Testing:** pytest
-- **Datasets:** Planetoid (Cora, CiteSeer, PubMed), extensible to OGB
-
-## 🔬 Sparsification Methods
-
-### Currently Implemented:
-
-- ✅ **RandomSparsifier** - Baseline random edge removal
-- ✅ **MetricSparsifier** - Jaccard, Cosine, Euclidean similarity
-- 🚧 **SpectralSparsifier** - Spectral graph theory (placeholder)
-
-### API Example:
-
-```python
-from torch_geometric.datasets import Planetoid
-from src.sparsification.metric import MetricSparsifier
-
-# Load dataset
-dataset = Planetoid(root='data/', name='Cora')
-data = dataset[0]
-
-# Apply sparsification
-sparsifier = MetricSparsifier(
-    sparsification_ratio=0.5,
-    metric='jaccard'
-)
-sparse_data = sparsifier.sparsify(data)
-
-# View statistics
-stats = sparsifier.get_sparsification_stats(data, sparse_data)
-print(stats)
-```
-
-## 📊 Preliminary Results
-
-- **Baseline (Full Graph):** ~80% Accuracy on Cora (GCN)
-- **Sparsified Graphs:** Experiments ongoing
-
-Full results will be updated as experiments complete.
+| Dataset | Type | Nodes | Edges | Metric | Key Insight |
+|---------|------|-------|-------|--------|-------------|
+| **Cora** | Citation | 2.7K | 5K | Jaccard | **High Redundancy:** 40% edges removed with <1% acc drop. |
+| **PubMed** | Citation | 19.7K | 44K | Jaccard | **Hard Core:** Sparsification saturates at 65% retention. |
+| **Flickr** | Social | 89K | 900K | Adamic-Adar | **Structure:** Adamic-Adar effectively prunes high-degree hubs. |
 
 ## 🛠️ Development Status
 
-### ✅ Completed:
-- Core sparsification module with abstract base class
-- Three sparsification methods (Random, Metric, Spectral placeholder)
-- Hydra configuration system
-- Project structure refactoring
-- Unit tests for sparsification
-- Documentation (Quick Start, Architecture, Migration)
+**Current Phase:** Transitioning from *Exploratory Notebooks* to *Modular Python Package*.
 
-### 🚧 In Progress:
-- GNN model implementations (GCN, GAT)
-- Training loop completion
-- Weights & Biases integration
-- Comprehensive experiments
+### ✅ Completed
 
-### 📋 Planned:
-- Additional sparsification methods
-- Link prediction tasks
-- Graph-level classification
-- Hyperparameter optimization
-- Extended benchmarks on OGB datasets
+- [x] Validated Jaccard Metric Backbone on small dense graphs.
+- [x] Implemented Sparse Tensor algebra for medium graphs.
+- [x] Implemented Adamic-Adar Metric Backbone for social graphs.
+- [x] Optimized memory usage for Apple Silicon (MPS/M4).
 
-## 🤝 Contributing
+### 🚧 In Progress
 
-This is an academic research project. For questions or suggestions:
+- [ ] Refactoring notebook logic into reusable `src/` modules.
+- [ ] Finalizing `Hydra` configuration integration.
+- [ ] Standardizing the `train.py` CLI entry point.
 
-1. Check existing documentation in `docs/`
-2. Review code docstrings for API details
-3. Run tests before submitting changes
+### 📋 Future Work
+
+- **Spectral Methods:** Preserving graph Laplacian eigenvalues.
+- **OGB Datasets:** Scaling to millions of nodes (Arxiv, Products).
 
 ## 📄 License
 
-This project is part of an academic research initiative at Université Gustave Eiffel.
+This repository uses a **Dual License** model:
 
-## 🙏 Acknowledgments
+1. **Code:** The source code and notebooks are licensed under the **MIT License**.
+2. **Report & Figures:** The written report (`docs/`) and generated figures are licensed under **CC-BY 4.0**.
 
-- **Tutor:** Maximilien Dreveton
-- **Institution:** Université Gustave Eiffel / LAMA
+See [LICENSE](LICENSE) for details.
+
+## 🤝 Acknowledgments
+
+- **University:** Université Gustave Eiffel / LAMA
 - **Program:** Projet TREMPLIN RECHERCHE 2025/2026
-
-## 📞 Contact
-
-For questions about this research:
-- Open an issue on GitHub
-- Contact through the university
-
----
-
-**Note:** This project recently underwent a major refactoring to adopt professional MLOps standards. See [REFACTORING_SUMMARY.md](REFACTORING_SUMMARY.md) for details.
+- **Tutor:** Maximilien Dreveton
