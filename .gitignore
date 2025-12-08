@@ -43,6 +43,7 @@ build/
 *-checkpoint.ipynb
 profile_default/
 ipython_config.py
+notebooks/tutorials
 
 # --- IDE Settings ---
 .vscode/
