@@ -245,6 +245,97 @@ class AblationStudy:
         ]
         return pd.DataFrame(records)
 
+    def run_training_curves(
+        self,
+        model_name: str = "gcn",
+        metric: str = "jaccard",
+        retention_ratio: float = 0.6,
+        hidden_channels: int = 64,
+        epochs: int = 100,
+        patience: Optional[int] = None,
+        seed: int = 42,
+        **model_kwargs,
+    ) -> Dict[str, List[float]]:
+        """Run training for all four scenarios and collect validation accuracy history.
+
+        This method trains models on each ablation scenario and returns the
+        validation accuracy progression over epochs, enabling comparison of
+        training dynamics across different configurations.
+
+        Args:
+            model_name: GNN architecture ('gcn', 'sage', 'gat').
+            metric: Edge metric for sparsification and weighting.
+            retention_ratio: Fraction of edges to keep in sparse scenarios.
+            hidden_channels: Hidden layer size for the model.
+            epochs: Maximum training epochs per scenario.
+            patience: Early stopping patience. If None, trains for full epochs.
+            seed: Random seed for reproducibility.
+            **model_kwargs: Additional model arguments (e.g., heads for GAT).
+
+        Returns:
+            Dictionary mapping scenario names to lists of validation accuracies.
+            Example: {"A: Full + Binary": [0.72, 0.75, ...], ...}
+
+        Example:
+            >>> curves = study.run_training_curves(
+            ...     model_name="gcn",
+            ...     metric="jaccard",
+            ...     retention_ratio=0.6,
+            ...     epochs=100,
+            ...     seed=42
+            ... )
+            >>> plt.plot(curves["A: Full + Binary"], label="Full + Binary")
+        """
+        # Generate sparse graph and edge weights once
+        sparse_data = self.sparsifier.sparsify(metric, retention_ratio)
+        full_weights = self.compute_edge_weights(self.data, metric)
+        sparse_weights = self.compute_edge_weights(sparse_data, metric)
+
+        # Define the 4 configurations
+        scenarios_config = [
+            (ExperimentScenario.A_FULL_BINARY, self.data, None),
+            (ExperimentScenario.B_SPARSE_BINARY, sparse_data, None),
+            (ExperimentScenario.C_FULL_WEIGHTED, self.data, full_weights),
+            (ExperimentScenario.D_SPARSE_WEIGHTED, sparse_data, sparse_weights),
+        ]
+
+        training_curves = {}
+
+        for scenario, exp_data, edge_weight in scenarios_config:
+            print(f"Training {scenario.value}...")
+            
+            # Set seed for reproducibility
+            set_global_seed(seed)
+
+            # Initialize fresh model
+            model = get_model(
+                model_name,
+                self.num_features,
+                hidden_channels,
+                self.num_classes,
+                **model_kwargs,
+            ).to(self.device)
+
+            # Train model
+            optimizer = torch.optim.Adam(
+                model.parameters(), lr=0.01, weight_decay=5e-4
+            )
+            trainer = GNNTrainer(model, optimizer, device=self.device)
+            
+            history = trainer.train(
+                exp_data,
+                epochs=epochs,
+                patience=patience,
+                edge_weight=edge_weight,
+            )
+
+            # Store validation accuracy history
+            training_curves[scenario.value] = history["val_acc"]
+            print(f"  -> Final val acc: {history['val_acc'][-1]:.4f} "
+                  f"(epochs: {history['epochs_trained']})")
+
+        return training_curves
+
     def run_multi_config_study(
         self,
         model_names: List[str],
