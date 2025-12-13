@@ -12,13 +12,36 @@ experiment:
   name: baseline_experiment
   seed: 42
   device: cuda  # or cpu
+  # Ablation study parameters
+  datasets:
+    - Cora
+    - PubMed
+    - Flickr
+  metrics:
+    - jaccard
+    - adamic_adar
+    - random
+    - approx_er
+  retentions:
+    - 0.1
+    - 0.2
+    - 0.3
+    - 0.4
+    - 0.5
+    - 0.6
+    - 0.7
+    - 0.8
+    - 0.9
+    - 1.0
+  model: gcn
+  hidden_channels: 64
 
 # Training hyperparameters
 training:
   epochs: 200
   learning_rate: 0.01
   weight_decay: 5.0e-4
-  patience: 50  # Early stopping patience
+  patience: 20  # Early stopping patience
   monitor: val_acc  # Metric to monitor for early stopping
 
 # Logging and outputs

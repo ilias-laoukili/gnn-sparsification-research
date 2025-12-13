@@ -9,6 +9,10 @@ processed/
 outputs/
 multirun/
 
+# Results that shouldn't be in git
+notebooks/results/
+!notebooks/results/.gitkeep
+
 # Weights & Biases
 wandb/
 *.wandb

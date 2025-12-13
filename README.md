@@ -34,7 +34,15 @@ $$d(u,v) = 1 - \frac{|N(u) \cap N(v)|}{|N(u) \cup N(v)|}$$
 Used for social networks. Weights common neighbors by their rarity (inverse log degree):
 $$AA(u,v) = \sum_{z \in N(u) \cap N(v)} \frac{1}{\log(|N(z)|)}$$
 
-### 3. Random Baseline
+### 3. Effective Resistance (Spectral)
+Measures edge criticality based on electrical network analogy. High R_eff = bottleneck edge:
+$$R_{eff}(u,v) = L^+_{uu} + L^+_{vv} - 2L^+_{uv}$$
+
+**Two implementations available:**
+- **Exact** (`effective_resistance`): Dense O(N³) for small benchmarks (<5K nodes)
+- **Approximate** (`approx_er`): JLT-based O(m log n) for large graphs (>10K nodes)
+
+### 4. Random Baseline
 Random edge removal to establish a performance lower bound.
 
 ## 🏗️ Project Structure
@@ -97,6 +105,19 @@ jupyter notebook notebooks/exploratory/
 | **Cora** | Citation | 2.7K | 5K | Jaccard | **High Redundancy:** 40% edges removed with <1% acc drop. |
 | **PubMed** | Citation | 19.7K | 44K | Jaccard | **Hard Core:** Sparsification saturates at 65% retention. |
 | **Flickr** | Social | 89K | 900K | Adamic-Adar | **Structure:** Adamic-Adar effectively prunes high-degree hubs. |
+
+### Effective Resistance Approximation Quality
+
+The JLT-based approximation preserves rankings with Spearman ρ ≈ 0.80:
+
+| Metric | Exact ER | Approx ER (ε=0.3) |
+|--------|----------|-------------------|
+| Time (Cora) | 2.6s | 40s |
+| Time (Flickr) | ∞ (OOM) | ~5 min |
+| Spearman ρ | 1.0 | 0.80 |
+| Top-10% overlap | 100% | 77% |
+
+**Note:** Approx ER is slower on small graphs but essential for large graphs where O(N³) is infeasible.
 
 ## 🛠️ Development Status
 

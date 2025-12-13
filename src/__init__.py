@@ -13,7 +13,13 @@ from .sparsification.metrics import (
     calculate_jaccard_scores,
 )
 from .training import EarlyStopper, GNNTrainer
-from .utils import set_global_seed
+from .utils import (
+    set_global_seed,
+    compute_effects,
+    compute_graph_stats,
+    retention_to_numeric,
+    run_ablation_config,
+)
 
 __version__ = "0.1.0"
 
@@ -31,4 +37,8 @@ __all__ = [
     "AblationStudy",
     "ExperimentScenario",
     "set_global_seed",
+    "compute_effects",
+    "compute_graph_stats",
+    "retention_to_numeric",
+    "run_ablation_config",
 ]

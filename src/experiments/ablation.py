@@ -13,6 +13,7 @@ import pandas as pd
 import torch
 from torch import Tensor
 from torch_geometric.data import Data
+import time
 
 from ..models.gnn import BaseGNN, get_model
 from ..sparsification.core import GraphSparsifier
@@ -49,6 +50,9 @@ class ExperimentResult:
         epochs_trained: Number of epochs before stopping.
         best_val_acc: Best validation accuracy during training.
         num_edges: Number of edges in the graph used.
+        preprocessing_time_sec: Time spent preparing graph/weights for this run.
+        training_time_sec: Wall-clock training time for this run.
+        peak_memory_mb: Peak GPU memory allocated (if CUDA), else 0.
     """
 
     scenario: ExperimentScenario
@@ -56,6 +60,9 @@ class ExperimentResult:
     epochs_trained: int
     best_val_acc: float
     num_edges: int
+    preprocessing_time_sec: float
+    training_time_sec: float
+    peak_memory_mb: float
 
 
 class AblationStudy:
@@ -98,6 +105,7 @@ class AblationStudy:
         self.device = device
         self.sparsifier = GraphSparsifier(data, device)
         self.results: List[ExperimentResult] = []
+        self.verbose: bool = False
 
     def compute_edge_weights(
         self,
@@ -142,6 +150,12 @@ class AblationStudy:
         """Execute a single experimental scenario."""
         set_global_seed(seed)
 
+        # Measure preprocessing time for this scenario (edge weights already computed externally)
+        prep_start = time.time()
+        # No heavy preprocessing here beyond passing data/weights, but keep hook
+        prep_end = time.time()
+        preprocessing_time_sec = prep_end - prep_start
+
         model = get_model(
             model_name,
             self.num_features,
@@ -155,12 +169,25 @@ class AblationStudy:
         )
         trainer = GNNTrainer(model, optimizer, device=self.device)
 
+        # Track peak CUDA memory
+        peak_memory_mb = 0.0
+        if torch.cuda.is_available() and self.device.startswith("cuda"):
+            torch.cuda.reset_peak_memory_stats()
+
+        # Measure training wall time
+        train_start = time.time()
         accuracy, history = trainer.train_and_evaluate(
             exp_data,
             epochs=epochs,
             patience=patience,
             edge_weight=edge_weight,
         )
+        train_end = time.time()
+        training_time_sec = train_end - train_start
+
+        if torch.cuda.is_available() and self.device.startswith("cuda"):
+            peak_bytes = torch.cuda.max_memory_allocated()
+            peak_memory_mb = float(peak_bytes) / (1024.0 * 1024.0)
 
         return ExperimentResult(
             scenario=scenario,
@@ -168,6 +195,9 @@ class AblationStudy:
             epochs_trained=history["epochs_trained"],
             best_val_acc=history["best_val_acc"],
             num_edges=exp_data.edge_index.size(1),
+            preprocessing_time_sec=preprocessing_time_sec,
+            training_time_sec=training_time_sec,
+            peak_memory_mb=peak_memory_mb,
         )
 
     def run_full_study(
@@ -198,9 +228,13 @@ class AblationStudy:
         """
         self.results = []
 
+        # Measure sparsification and weight computation times
+        prep_start = time.time()
         sparse_data = self.sparsifier.sparsify(metric, retention_ratio)
         full_weights = self.compute_edge_weights(self.data, metric)
         sparse_weights = self.compute_edge_weights(sparse_data, metric)
+        prep_end = time.time()
+        common_prep_time = prep_end - prep_start
 
         scenarios_config = [
             (ExperimentScenario.A_FULL_BINARY, self.data, None),
@@ -210,7 +244,8 @@ class AblationStudy:
         ]
 
         for scenario, exp_data, edge_weight in scenarios_config:
-            print(f"Running {scenario.value}...")
+            if self.verbose:
+                print(f"Running {scenario.value}...")
             result = self._run_single_experiment(
                 scenario=scenario,
                 exp_data=exp_data,
@@ -222,8 +257,11 @@ class AblationStudy:
                 seed=seed,
                 **model_kwargs,
             )
+            # Add common preprocessing time (sparsify + compute weights once) to each scenario
+            result.preprocessing_time_sec += common_prep_time
             self.results.append(result)
-            print(f"  -> Accuracy: {result.accuracy:.4f}")
+            if self.verbose:
+                print(f"  -> Accuracy: {result.accuracy:.4f}")
 
         return self.results_to_dataframe()
 
@@ -240,6 +278,9 @@ class AblationStudy:
                 "Epochs": r.epochs_trained,
                 "BestValAcc": r.best_val_acc,
                 "Edges": r.num_edges,
+                "PreprocessSec": r.preprocessing_time_sec,
+                "TrainSec": r.training_time_sec,
+                "PeakMemMB": r.peak_memory_mb,
             }
             for r in self.results
         ]

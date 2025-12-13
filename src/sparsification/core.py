@@ -11,7 +11,12 @@ import scipy.sparse as sp
 import torch
 from torch_geometric.data import Data
 
-from .metrics import calculate_adamic_adar_scores, calculate_jaccard_scores
+from .metrics import (
+    calculate_adamic_adar_scores,
+    calculate_jaccard_scores,
+    calculate_effective_resistance_scores,
+    calculate_approx_effective_resistance_scores,
+)
 
 
 class GraphSparsifier:
@@ -36,7 +41,20 @@ class GraphSparsifier:
         >>> sparse_data = sparsifier.sparsify("jaccard", retention_ratio=0.5)
     """
 
-    SUPPORTED_METRICS = {"jaccard", "adamic-adar", "adamic_adar", "aa"}
+    SUPPORTED_METRICS = {
+        "jaccard",
+        "adamic-adar",
+        "adamic_adar",
+        "aa",
+        "effective_resistance",
+        "effective-resistance",
+        "er",
+        "approx_er",
+        "approx_effective_resistance",
+        "approx-er",
+        "random",
+        "rand",
+    }
 
     def __init__(self, data: Data, device: str) -> None:
         self.data = data
@@ -57,6 +75,12 @@ class GraphSparsifier:
         metric_lower = metric.lower().replace("-", "_")
         if metric_lower in {"adamic_adar", "aa"}:
             return "adamic_adar"
+        if metric_lower in {"effective_resistance", "er"}:
+            return "effective_resistance"
+        if metric_lower in {"approx_er", "approx_effective_resistance"}:
+            return "approx_er"
+        if metric_lower in {"random", "rand"}:
+            return "random"
         return metric_lower
 
     def compute_scores(self, metric: str) -> np.ndarray:
@@ -73,7 +97,7 @@ class GraphSparsifier:
         """
         metric_key = self._normalize_metric_name(metric)
 
-        if metric_key not in {"jaccard", "adamic_adar"}:
+        if metric_key not in {"jaccard", "adamic_adar", "effective_resistance", "approx_er", "random"}:
             raise ValueError(
                 f"Metric '{metric}' not supported. "
                 f"Choose from: {self.SUPPORTED_METRICS}"
@@ -84,8 +108,14 @@ class GraphSparsifier:
 
         if metric_key == "jaccard":
             scores = calculate_jaccard_scores(self.adj)
-        else:
+        elif metric_key == "adamic_adar":
             scores = calculate_adamic_adar_scores(self.adj)
+        elif metric_key == "effective_resistance":
+            scores = calculate_effective_resistance_scores(self.adj)
+        elif metric_key == "approx_er":
+            scores = calculate_approx_effective_resistance_scores(self.adj)
+        else:  # random baseline
+            scores = np.random.rand(self.num_edges)
 
         self._score_cache[metric_key] = scores
         return scores

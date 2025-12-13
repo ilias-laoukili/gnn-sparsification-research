@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
         "--metric",
         type=str,
         default="jaccard",
-        choices=["jaccard", "adamic_adar", "random"],
+        choices=["jaccard", "adamic_adar", "random", "effective_resistance", "approx_er"],
         help="Similarity metric for sparsification",
     )
 
@@ -285,6 +285,12 @@ def main() -> None:
 
     print("\n[1/4] Loading dataset...")
     loader = DatasetLoader(root="./data")
+    # Skip Flickr specifically for approx_er metric
+    if args.dataset.lower() == "flickr" and args.metric in {"approx_er", "approx_effective_resistance", "approx-er"}:
+        print("Warning: Skipping Flickr for 'approx_er' metric due to constraints.")
+        print("✓ Nothing to run for this combination. Exiting.")
+        return
+
     data, num_features, num_classes = loader.get_dataset(args.dataset, str(device))
     print(f"      Nodes: {data.num_nodes:,}")
     print(f"      Edges: {data.edge_index.size(1):,}")
