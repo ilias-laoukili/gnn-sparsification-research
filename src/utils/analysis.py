@@ -71,7 +71,7 @@ def run_ablation_config(
     """Run a single (dataset, metric, retention) ablation config and return results."""
     # Import here to avoid circular import at module load time
     from ..experiments import AblationStudy
-    
+
     # Scope thread limits to the worker process
     os.environ["OMP_NUM_THREADS"] = str(worker_threads)
     os.environ["MKL_NUM_THREADS"] = str(worker_threads)

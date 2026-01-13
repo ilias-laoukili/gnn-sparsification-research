@@ -5,7 +5,36 @@
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red)
 ![License](https://img.shields.io/badge/License-MIT%20%2B%20CC--BY-lightgrey)
 
-> **⚠️ Note:** The core research logic and results are fully functional in the `notebooks/exploratory/` directory. The modular package structure (`src/` and `scripts/`) is currently under active refactoring to support MLOps standards. **Please refer to the notebooks for reproducible results.**
+## 🚦 Project Status
+
+**Phase:** Research Validation (Pre-Publication)
+
+### What Works ✅
+- ✅ Exploratory notebooks with validated results (see [`notebooks/exploratory/`](notebooks/exploratory))
+- ✅ Jaccard/Adamic-Adar similarity-based sparsification
+- ✅ Experiments on Cora, PubMed, Flickr datasets
+- ✅ Comprehensive unit tests for all sparsification methods
+- ✅ Statistical analysis tools (confidence intervals, significance tests)
+
+### What's Being Fixed 🚧
+- 🚧 True metric backbone implementation (RTI filtering) - **COMPLETED**
+- 🚧 Effective resistance approximation performance - **COMPLETED**
+- 🚧 Baseline comparison methods (degree, betweenness, DropEdge) - **COMPLETED**
+- 🚧 Unit tests and CI/CD pipeline - **IN PROGRESS**
+- 🚧 Statistical significance testing - **COMPLETED**
+
+### How to Reproduce Results
+
+```bash
+# Option 1: Run notebooks (recommended for exploration)
+jupyter notebook notebooks/exploratory/
+
+# Option 2: Run automated experiments (reproducibility)
+bash scripts/reproduce_experiments.sh
+
+# Option 3: Run specific dataset/method
+bash scripts/reproduce_experiments.sh --dataset cora --method jaccard
+```
 
 ## Introduction
 

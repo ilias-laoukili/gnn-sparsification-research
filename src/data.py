@@ -3,8 +3,9 @@
 from typing import Tuple
 
 import torch
+import torch_geometric.transforms as T
 from torch_geometric.data import Data
-from torch_geometric.datasets import Planetoid
+from torch_geometric.datasets import Planetoid, Flickr
 
 
 class DatasetLoader:
@@ -28,13 +29,11 @@ class DatasetLoader:
     def __init__(self, root: str = "data") -> None:
         self.root = root
 
-    def get_dataset(
-        self, name: str, device: str = "cpu"
-    ) -> Tuple[Data, int, int]:
+    def get_dataset(self, name: str, device: str = "cpu") -> Tuple[Data, int, int]:
         """Load a dataset by name and move to specified device.
 
         Args:
-            name: Dataset name (e.g., 'cora', 'pubmed', 'citeseer').
+            name: Dataset name (e.g., 'cora', 'pubmed', 'citeseer', 'flickr').
             device: Target device for the data ('cpu', 'cuda', or 'mps').
 
         Returns:
@@ -51,19 +50,33 @@ class DatasetLoader:
             >>> data, n_features, n_classes = loader.get_dataset("cora")
         """
         name_lower = name.lower()
+        
+        transform = T.Compose(
+            [
+                T.ToUndirected(),
+                T.NormalizeFeatures(),
+            ]
+        )
 
         if name_lower in ["cora", "pubmed", "citeseer"]:
             dataset = Planetoid(
                 root=self.root,
                 name=name_lower.capitalize(),
+                transform=transform,
             )
-            data = dataset[0].to(device)
-            num_features = dataset.num_features
-            num_classes = dataset.num_classes
+        elif name_lower == "flickr":
+            dataset = Flickr(
+                root=f"{self.root}/Flickr",
+                transform=transform,
+            )
         else:
             raise ValueError(
                 f"Unsupported dataset: {name}. "
-                f"Supported datasets: cora, pubmed, citeseer"
+                f"Supported datasets: cora, pubmed, citeseer, flickr"
             )
+
+        data = dataset[0].to(device)
+        num_features = dataset.num_features
+        num_classes = dataset.num_classes
 
         return data, num_features, num_classes

@@ -18,9 +18,7 @@ class BaseGNN(nn.Module, ABC):
     """
 
     @abstractmethod
-    def forward(
-        self, data: Data, edge_weight: Optional[Tensor] = None
-    ) -> Tensor:
+    def forward(self, data: Data, edge_weight: Optional[Tensor] = None) -> Tensor:
         """Forward pass through the network.
 
         Args:
@@ -73,9 +71,7 @@ class GCN(BaseGNN):
         self.conv1 = GCNConv(in_channels, hidden_channels)
         self.conv2 = GCNConv(hidden_channels, out_channels)
 
-    def forward(
-        self, data: Data, edge_weight: Optional[Tensor] = None
-    ) -> Tensor:
+    def forward(self, data: Data, edge_weight: Optional[Tensor] = None) -> Tensor:
         x, edge_index = data.x, data.edge_index
         x = self.conv1(x, edge_index, edge_weight=edge_weight)
         x = F.relu(x)
@@ -117,9 +113,7 @@ class GraphSAGE(BaseGNN):
         self.conv1 = SAGEConv(in_channels, hidden_channels)
         self.conv2 = SAGEConv(hidden_channels, out_channels)
 
-    def forward(
-        self, data: Data, edge_weight: Optional[Tensor] = None
-    ) -> Tensor:
+    def forward(self, data: Data, edge_weight: Optional[Tensor] = None) -> Tensor:
         x, edge_index = data.x, data.edge_index
         x = self.conv1(x, edge_index)
         x = F.relu(x)
@@ -162,9 +156,7 @@ class GAT(BaseGNN):
     ) -> None:
         super().__init__()
         self.dropout = dropout
-        self.conv1 = GATConv(
-            in_channels, hidden_channels, heads=heads, dropout=dropout
-        )
+        self.conv1 = GATConv(in_channels, hidden_channels, heads=heads, dropout=dropout)
         self.conv2 = GATConv(
             hidden_channels * heads,
             out_channels,
@@ -173,9 +165,7 @@ class GAT(BaseGNN):
             dropout=dropout,
         )
 
-    def forward(
-        self, data: Data, edge_weight: Optional[Tensor] = None
-    ) -> Tensor:
+    def forward(self, data: Data, edge_weight: Optional[Tensor] = None) -> Tensor:
         x, edge_index = data.x, data.edge_index
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.conv1(x, edge_index)
@@ -217,9 +207,5 @@ def get_model(
     """
     name_lower = name.lower()
     if name_lower not in MODEL_REGISTRY:
-        raise ValueError(
-            f"Model '{name}' not found. Available: {list(MODEL_REGISTRY.keys())}"
-        )
-    return MODEL_REGISTRY[name_lower](
-        in_channels, hidden_channels, out_channels, **kwargs
-    )
+        raise ValueError(f"Model '{name}' not found. Available: {list(MODEL_REGISTRY.keys())}")
+    return MODEL_REGISTRY[name_lower](in_channels, hidden_channels, out_channels, **kwargs)

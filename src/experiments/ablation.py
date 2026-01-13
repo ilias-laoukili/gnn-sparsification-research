@@ -77,6 +77,8 @@ class AblationStudy:
         num_features: Input feature dimensionality.
         num_classes: Number of target classes.
         device: Computation device string.
+        use_metric_backbone: If True, use RTI metric backbone for sparsification.
+        backbone_alpha: Optional fixed alpha for the metric backbone search.
 
     Attributes:
         data: Original full graph data.
@@ -98,13 +100,18 @@ class AblationStudy:
         num_features: int,
         num_classes: int,
         device: str,
+        use_metric_backbone: bool = False,
+        backbone_alpha: Optional[float] = None,
     ) -> None:
         self.data = data
         self.num_features = num_features
         self.num_classes = num_classes
         self.device = device
         self.sparsifier = GraphSparsifier(data, device)
+        self.use_metric_backbone = use_metric_backbone
+        self.backbone_alpha = backbone_alpha
         self.results: List[ExperimentResult] = []
+        self.verbose: bool = False
         self.verbose: bool = False
 
     def compute_edge_weights(
@@ -123,16 +130,16 @@ class AblationStudy:
         """
         temp_sparsifier = GraphSparsifier(data, self.device)
         scores = temp_sparsifier.compute_scores(metric)
-        
+
         scores_min = scores.min()
         scores_max = scores.max()
         if scores_max > scores_min:
             normalized = (scores - scores_min) / (scores_max - scores_min)
         else:
             normalized = np.ones_like(scores)
-        
+
         normalized = np.clip(normalized, 0.1, 1.0)
-        
+
         return torch.tensor(normalized, dtype=torch.float32, device=self.device)
 
     def _run_single_experiment(
@@ -164,9 +171,7 @@ class AblationStudy:
             **model_kwargs,
         ).to(self.device)
 
-        optimizer = torch.optim.Adam(
-            model.parameters(), lr=0.01, weight_decay=5e-4
-        )
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=5e-4)
         trainer = GNNTrainer(model, optimizer, device=self.device)
 
         # Track peak CUDA memory
@@ -209,6 +214,8 @@ class AblationStudy:
         epochs: int = 200,
         patience: int = 20,
         seed: int = 42,
+        use_metric_backbone: Optional[bool] = None,
+        backbone_alpha: Optional[float] = None,
         **model_kwargs,
     ) -> pd.DataFrame:
         """Execute all four scenarios of the ablation study.
@@ -228,9 +235,21 @@ class AblationStudy:
         """
         self.results = []
 
+        backbone_flag = self.use_metric_backbone if use_metric_backbone is None else use_metric_backbone
+        alpha_value = backbone_alpha if backbone_alpha is not None else self.backbone_alpha
+
         # Measure sparsification and weight computation times
         prep_start = time.time()
-        sparse_data = self.sparsifier.sparsify(metric, retention_ratio)
+        if backbone_flag:
+            sparse_data, backbone_stats = self.sparsifier.sparsify_metric_backbone(
+                metric=metric,
+                target_retention=retention_ratio,
+                alpha=alpha_value,
+            )
+            if self.verbose:
+                print(f"Metric backbone retention: {backbone_stats['retention_ratio']:.1%}")
+        else:
+            sparse_data = self.sparsifier.sparsify(metric, retention_ratio)
         full_weights = self.compute_edge_weights(self.data, metric)
         sparse_weights = self.compute_edge_weights(sparse_data, metric)
         prep_end = time.time()
@@ -344,7 +363,7 @@ class AblationStudy:
 
         for scenario, exp_data, edge_weight in scenarios_config:
             print(f"Training {scenario.value}...")
-            
+
             # Set seed for reproducibility
             set_global_seed(seed)
 
@@ -358,11 +377,9 @@ class AblationStudy:
             ).to(self.device)
 
             # Train model
-            optimizer = torch.optim.Adam(
-                model.parameters(), lr=0.01, weight_decay=5e-4
-            )
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=5e-4)
             trainer = GNNTrainer(model, optimizer, device=self.device)
-            
+
             history = trainer.train(
                 exp_data,
                 epochs=epochs,
@@ -372,8 +389,10 @@ class AblationStudy:
 
             # Store validation accuracy history
             training_curves[scenario.value] = history["val_acc"]
-            print(f"  -> Final val acc: {history['val_acc'][-1]:.4f} "
-                  f"(epochs: {history['epochs_trained']})")
+            print(
+                f"  -> Final val acc: {history['val_acc'][-1]:.4f} "
+                f"(epochs: {history['epochs_trained']})"
+            )
 
         return training_curves
 
@@ -385,9 +404,11 @@ class AblationStudy:
         hidden_channels: int = 64,
         epochs: int = 200,
         patience: int = 20,
-        seed: int = 42,
+        seeds: List[int] = [42],
+        use_metric_backbone: Optional[bool] = None,
+        backbone_alpha: Optional[float] = None,
     ) -> pd.DataFrame:
-        """Run ablation study across multiple configurations.
+        """Run ablation study across multiple configurations and seeds.
 
         Args:
             model_names: List of model architectures to test.
@@ -396,7 +417,7 @@ class AblationStudy:
             hidden_channels: Hidden layer size.
             epochs: Maximum training epochs.
             patience: Early stopping patience.
-            seed: Random seed.
+            seeds: List of random seeds for reproducibility.
 
         Returns:
             DataFrame with all results including config columns.
@@ -406,22 +427,26 @@ class AblationStudy:
         for model_name in model_names:
             for metric in metrics:
                 for retention in retention_ratios:
-                    print(f"\n{'='*60}")
-                    print(f"Config: {model_name} | {metric} | {retention:.0%}")
-                    print(f"{'='*60}")
+                    for seed in seeds:
+                        print(f"\n{'='*60}")
+                        print(f"Config: {model_name} | {metric} | {retention:.0%} | Seed: {seed}")
+                        print(f"{'='*60}")
 
-                    df = self.run_full_study(
-                        model_name=model_name,
-                        metric=metric,
-                        retention_ratio=retention,
-                        hidden_channels=hidden_channels,
-                        epochs=epochs,
-                        patience=patience,
-                        seed=seed,
-                    )
-                    df["Model"] = model_name
-                    df["Metric"] = metric
-                    df["Retention"] = retention
-                    all_results.append(df)
+                        df = self.run_full_study(
+                            model_name=model_name,
+                            metric=metric,
+                            retention_ratio=retention,
+                            hidden_channels=hidden_channels,
+                            epochs=epochs,
+                            patience=patience,
+                            seed=seed,
+                            use_metric_backbone=use_metric_backbone,
+                            backbone_alpha=backbone_alpha,
+                        )
+                        df["Model"] = model_name
+                        df["Metric"] = metric
+                        df["Retention"] = retention
+                        df["Seed"] = seed
+                        all_results.append(df)
 
         return pd.concat(all_results, ignore_index=True)

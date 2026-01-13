@@ -3,6 +3,7 @@
 data/
 raw/
 processed/
+notebooks/data/
 
 # --- Experiment Outputs ---
 # Hydra outputs
@@ -59,3 +60,12 @@ notebooks/tutorials
 # --- Logs ---
 *.log
 logs/
+
+# --- Testing & Coverage ---
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.tox/
+.hypothesis/

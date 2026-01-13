@@ -109,9 +109,7 @@ class GNNTrainer:
         self.device = device
         self.history: dict = {"train_loss": [], "val_acc": []}
 
-    def _train_step(
-        self, data: Data, edge_weight: Optional[Tensor] = None
-    ) -> float:
+    def _train_step(self, data: Data, edge_weight: Optional[Tensor] = None) -> float:
         """Execute single training step."""
         self.model.train()
         self.optimizer.zero_grad()
@@ -125,9 +123,7 @@ class GNNTrainer:
         return loss.item()
 
     @torch.no_grad()
-    def _evaluate(
-        self, data: Data, mask: Tensor, edge_weight: Optional[Tensor] = None
-    ) -> float:
+    def _evaluate(self, data: Data, mask: Tensor, edge_weight: Optional[Tensor] = None) -> float:
         """Compute accuracy on masked nodes."""
         self.model.eval()
         out = self.model(data, edge_weight=edge_weight)
@@ -182,9 +178,7 @@ class GNNTrainer:
 
         return self.history
 
-    def evaluate(
-        self, data: Data, edge_weight: Optional[Tensor] = None
-    ) -> float:
+    def evaluate(self, data: Data, edge_weight: Optional[Tensor] = None) -> float:
         """Compute test accuracy.
 
         Args:

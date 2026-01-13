@@ -19,6 +19,7 @@ from .utils import (
     compute_graph_stats,
     retention_to_numeric,
     run_ablation_config,
+    print_text_table,
 )
 
 __version__ = "0.1.0"
@@ -41,4 +42,5 @@ __all__ = [
     "compute_graph_stats",
     "retention_to_numeric",
     "run_ablation_config",
+    "print_text_table",
 ]

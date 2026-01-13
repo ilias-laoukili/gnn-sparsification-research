@@ -5,7 +5,6 @@ from .metrics import (
     calculate_adamic_adar_scores,
     calculate_jaccard_scores,
     calculate_effective_resistance_scores,
-    calculate_approx_effective_resistance_scores,
 )
 
 __all__ = [
@@ -13,5 +12,4 @@ __all__ = [
     "calculate_jaccard_scores",
     "calculate_adamic_adar_scores",
     "calculate_effective_resistance_scores",
-    "calculate_approx_effective_resistance_scores",
 ]
