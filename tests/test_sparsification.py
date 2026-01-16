@@ -16,6 +16,7 @@ from src.sparsification.metrics import (
     calculate_jaccard_scores,
     calculate_adamic_adar_scores,
     calculate_effective_resistance_scores,
+    calculate_approx_effective_resistance_scores,
 )
 from src.sparsification.baselines import SparsificationBaselines
 
@@ -140,6 +141,37 @@ class TestMetrics:
         # All edges in triangle should have same resistance
         # (by symmetry)
         assert np.allclose(scores, scores[0], rtol=1e-3)
+
+    def test_approx_effective_resistance_positive(self, triangle_adj):
+        """Approximate effective resistance scores should be positive."""
+        scores = calculate_approx_effective_resistance_scores(triangle_adj)
+        assert np.all(scores > 0)
+
+    def test_approx_effective_resistance_symmetry(self, triangle_adj):
+        """Approximate ER should show symmetry for symmetric graphs."""
+        scores = calculate_approx_effective_resistance_scores(triangle_adj, seed=42)
+        # All edges in triangle should have similar resistance (approximate)
+        assert np.allclose(scores, scores[0], rtol=0.5)
+
+    def test_approx_effective_resistance_deterministic(self, triangle_adj):
+        """Same seed should give same results."""
+        scores1 = calculate_approx_effective_resistance_scores(triangle_adj, seed=42)
+        scores2 = calculate_approx_effective_resistance_scores(triangle_adj, seed=42)
+        assert np.allclose(scores1, scores2)
+
+    def test_approx_effective_resistance_correlation(self):
+        """Approximate ER should correlate with exact ER."""
+        # Karate club for a more realistic test
+        G = nx.karate_club_graph()
+        adj = nx.to_scipy_sparse_array(G, format="csr")
+
+        exact = calculate_effective_resistance_scores(adj)
+        approx = calculate_approx_effective_resistance_scores(adj, epsilon=0.3, seed=42)
+
+        # Spearman correlation should be reasonable (> 0.5)
+        from scipy.stats import spearmanr
+        corr, _ = spearmanr(exact, approx)
+        assert corr > 0.5
 
 
 class TestBaselines:

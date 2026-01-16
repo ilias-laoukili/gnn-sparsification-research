@@ -15,6 +15,7 @@ from .metrics import (
     calculate_adamic_adar_scores,
     calculate_jaccard_scores,
     calculate_effective_resistance_scores,
+    calculate_approx_effective_resistance_scores,
 )
 from .metric_backbone import metric_backbone_sparsify
 
@@ -49,6 +50,8 @@ class GraphSparsifier:
         "effective_resistance",
         "effective-resistance",
         "er",
+        "approx_effective_resistance",
+        "approx_er",
         "random",
         "rand",
         "degree",
@@ -95,6 +98,8 @@ class GraphSparsifier:
             return "adamic_adar"
         if metric_lower in {"effective_resistance", "er"}:
             return "effective_resistance"
+        if metric_lower in {"approx_effective_resistance", "approx_er"}:
+            return "approx_effective_resistance"
         if metric_lower in {"random", "rand"}:
             return "random"
         if metric_lower in {"degree"}:
@@ -128,6 +133,8 @@ class GraphSparsifier:
             scores = calculate_adamic_adar_scores(self.adj)
         elif metric_key == "effective_resistance":
             scores = calculate_effective_resistance_scores(self.adj)
+        elif metric_key == "approx_effective_resistance":
+            scores = calculate_approx_effective_resistance_scores(self.adj)
         elif metric_key == "random":
             scores = np.random.rand(self.adj.nnz)
         elif metric_key == "degree":
