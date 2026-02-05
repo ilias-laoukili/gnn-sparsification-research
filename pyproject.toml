@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "GNN Sparsification Research Team", email = "research@example.com"}
+    {name = "Ilias Laoukili"}
 ]
 keywords = ["graph neural networks", "sparsification", "metric backbone", "GNN"]
 classifiers = [
@@ -48,9 +48,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/gnn-sparsification-research"
-Documentation = "https://github.com/yourusername/gnn-sparsification-research/blob/main/README.md"
-Repository = "https://github.com/yourusername/gnn-sparsification-research"
+Homepage = "https://github.com/ilias-la/gnn-sparsification-research"
+Documentation = "https://github.com/ilias-la/gnn-sparsification-research#readme"
+Repository = "https://github.com/ilias-la/gnn-sparsification-research"
 
 [tool.setuptools.packages.find]
 where = ["."]

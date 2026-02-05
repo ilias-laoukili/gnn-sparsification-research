@@ -1,224 +1,231 @@
-"""Metric backbone sparsification via Relaxed Triangle Inequality (RTI).
+"""Global Metric Backbone sparsification preserving geodesic distances.
 
-Implementation of Serrano et al. (2009) metric backbone framework.
+The Metric Backbone B ⊆ G is defined such that for every pair of nodes (u,v),
+the shortest path distance in B equals the shortest path distance in G.
+
+Edge retention condition:
+    Keep edge (u,v) iff: w_uv <= d_G(u,v) + epsilon
+
+Where:
+    - w_uv is the direct edge weight
+    - d_G(u,v) is the shortest path distance via APSP
+    - epsilon is floating-point tolerance
+
+References:
+    Serrano, M.Á., Boguñá, M., & Vespignani, A. (2009).
+    "Extracting the multiscale backbone of complex weighted networks." PNAS.
 """
 
-from typing import Dict, Tuple, Set
+from typing import Dict, Tuple
 import numpy as np
 from numpy.typing import NDArray
-import scipy.sparse as sp
+import networkx as nx
 from torch_geometric.data import Data
 import torch
 
 
-def compute_triangle_detours(
-    adj: sp.csr_matrix, edge_metric_scores: NDArray[np.float64], verbose: bool = False
-) -> Dict[Tuple[int, int], float]:
-    """Compute minimum detour distance for each edge through triangles.
+def compute_metric_backbone(
+    data: Data,
+    edge_weights: NDArray[np.float64],
+    epsilon: float = 1e-9,
+    verbose: bool = True,
+) -> Tuple[Data, Dict]:
+    """Compute the Global Metric Backbone using All-Pairs Shortest Paths (APSP).
 
-    For edge (u,v), finds min_w[d(u,w) + d(w,v)] where w forms a triangle.
-
-    Args:
-        adj: Sparse adjacency matrix (symmetric, binary)
-        edge_metric_scores: Distance/metric values for each edge (aligned with CSR order)
-        verbose: Print progress statistics
-
-    Returns:
-        Dictionary mapping (u,v) edge tuple to minimum detour distance.
-        Returns np.inf if no triangles exist for an edge.
-    """
-    n = adj.shape[0]
-    rows, cols = adj.nonzero()
-
-    # Build edge-to-score mapping for O(1) lookup
-    # Store both directions for undirected graphs
-    edge_to_score = {}
-    for idx, (u, v) in enumerate(zip(rows, cols)):
-        edge_to_score[(u, v)] = edge_metric_scores[idx]
-        # For undirected graphs, also store reverse direction with same score
-        if (v, u) not in edge_to_score:
-            edge_to_score[(v, u)] = edge_metric_scores[idx]
-
-    detours = {}
-    edges_with_triangles = 0
-
-    # Access CSR internals for faster neighbor lookup
-    indptr = adj.indptr
-    indices = adj.indices
-
-    for idx, (u, v) in enumerate(zip(rows, cols)):
-        # Find common neighbors (triangle vertices)
-        neighbors_u = indices[indptr[u] : indptr[u + 1]]
-        neighbors_v = indices[indptr[v] : indptr[v + 1]]
-        
-        # Use set intersection on indices (efficient for sparse graphs)
-        common = set(neighbors_u) & set(neighbors_v)
-
-        if not common:
-            detours[(u, v)] = np.inf  # No detour possible
-            continue
-
-        # Compute minimum detour distance
-        min_detour = np.inf
-        for w in common:
-            # Get distances d(u,w) and d(w,v)
-            # Use .get() with None default, then check explicitly
-            d_uw = edge_to_score.get((u, w))
-            if d_uw is None:
-                d_uw = edge_to_score.get((w, u))
-            d_wv = edge_to_score.get((w, v))
-            if d_wv is None:
-                d_wv = edge_to_score.get((v, w))
-
-            if d_uw is not None and d_wv is not None:
-                detour = d_uw + d_wv
-                min_detour = min(min_detour, detour)
-
-        detours[(u, v)] = min_detour
-        if min_detour < np.inf:
-            edges_with_triangles += 1
-
-    if verbose:
-        total_edges = len(rows)
-        print(
-            f"  Edges with triangles: {edges_with_triangles}/{total_edges} "
-            f"({100*edges_with_triangles/total_edges:.1f}%)"
-        )
-
-    return detours
-
-
-def metric_backbone_sparsify(
-    data: Data, metric_scores: NDArray[np.float64], alpha: float = 1.5, verbose: bool = False
-) -> Tuple[Data, Dict[str, any]]:
-    """Apply metric backbone sparsification via Relaxed Triangle Inequality.
-
-    For dissimilarity metrics, removes edges that are "redundant" because an
-    efficient alternative path exists through a common neighbor.
-    
-    An edge (u,v) is removed if: min_detour <= alpha * direct_dist
-    where min_detour = min_w[d(u,w) + d(w,v)] for common neighbors w.
-    
-    Interpretation:
-    - If the best detour through a triangle is not much longer than direct,
-      the direct edge is redundant.
-    - alpha controls the threshold: higher alpha = more aggressive pruning
+    Retains edge (u,v) if and only if: w_uv <= d_G(u,v) + epsilon
 
     Args:
         data: PyTorch Geometric Data object
-        metric_scores: Distance/dissimilarity scores for edges (higher = weaker)
-        alpha: Stretch factor. Typical range [1.0, 2.0].
-               - alpha=1.0: No edges removed (exact triangle inequality)
-               - alpha→∞: All edges kept (no constraint)
-        verbose: Print statistics
+        edge_weights: Edge weights (dissimilarity/distance - higher = weaker).
+                      Must be aligned with data.edge_index ordering.
+        epsilon: Floating-point tolerance (default: 1e-9)
+        verbose: Print progress and statistics
 
     Returns:
-        (sparsified_data, statistics_dict)
+        Tuple of (sparsified_data, statistics_dict)
 
-    Algorithm Complexity:
-        - Time: O(E * k) where k = avg. common neighbors per edge
-        - Space: O(E) for detour storage
+    Complexity:
+        Time:  O(n * E * log(n)) for Dijkstra from all sources
+        Space: O(n²) for storing pairwise distances
 
-    References:
-        Serrano, M.Á., Boguñá, M., & Vespignani, A. (2009).
-        Extracting the multiscale backbone of complex weighted networks.
-        PNAS, 106(16), 6483-6488.
+        For large graphs (n > 10,000), consider approximate methods.
+
+    Example:
+        >>> dissimilarity = 1.0 - similarity_scores
+        >>> sparse_data, stats = compute_metric_backbone(data, dissimilarity)
+        >>> print(f"Retained {stats['retention_ratio']:.1%} of edges")
     """
     edge_index = data.edge_index.cpu().numpy()
-
-    # Convert to scipy sparse matrix
     rows, cols = edge_index[0], edge_index[1]
-    adj = sp.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(data.num_nodes, data.num_nodes))
+    n_nodes = data.num_nodes
+    n_edges = len(rows)
 
     if verbose:
-        print(f"Computing triangle detours for {len(rows)} edges...")
+        print(f"Computing Global Metric Backbone")
+        print(f"  Nodes: {n_nodes:,}, Edges: {n_edges:,}")
+        print(f"  Epsilon: {epsilon}")
 
-    # Compute minimum detour for each edge
-    detours = compute_triangle_detours(adj, metric_scores, verbose)
-
-    # Apply RTI filtering
-    # For dissimilarity metrics: remove edge if detour is efficient
-    # i.e., min_detour <= alpha * direct_dist (edge is redundant)
-    keep_mask = []
-    edges_removed_by_rti = 0
-    edges_without_triangles = 0
+    # Step 1: Build weighted NetworkX graph
+    G = nx.Graph()
+    G.add_nodes_from(range(n_nodes))
 
     for idx, (u, v) in enumerate(zip(rows, cols)):
-        direct_dist = metric_scores[idx]
-        min_detour = detours.get((u, v), np.inf)
+        weight = edge_weights[idx]
+        if u < v:  # Undirected: add each edge once
+            if G.has_edge(u, v):
+                G[u][v]['weight'] = min(G[u][v]['weight'], weight)
+            else:
+                G.add_edge(u, v, weight=weight)
 
-        if min_detour == np.inf:
-            # No triangles - keep edge (isolated or bridging)
-            keep_mask.append(True)
-            edges_without_triangles += 1
-        elif min_detour > alpha * direct_dist:
-            # Detour is much longer than direct - edge is important, keep it
-            keep_mask.append(True)
+    if verbose:
+        print(f"  Unique undirected edges: {G.number_of_edges():,}")
+        print(f"  Computing APSP via Dijkstra... ", end="", flush=True)
+
+    # Step 2: Compute All-Pairs Shortest Paths
+    dist_matrix = dict(nx.all_pairs_dijkstra_path_length(G, weight='weight'))
+
+    if verbose:
+        print("Done!")
+        print(f"  Classifying edges...")
+
+    # Step 3: Classify edges as metric or semi-metric
+    keep_mask = np.zeros(n_edges, dtype=bool)
+    edges_metric = 0
+    edges_semi_metric = 0
+
+    for idx, (u, v) in enumerate(zip(rows, cols)):
+        direct_weight = edge_weights[idx]
+        shortest_dist = dist_matrix.get(u, {}).get(v, np.inf)
+
+        if shortest_dist == np.inf:
+            # Disconnected nodes - keep edge (bridge)
+            keep_mask[idx] = True
+            edges_metric += 1
+        elif direct_weight <= shortest_dist + epsilon:
+            # Metric edge: lies on a shortest path
+            keep_mask[idx] = True
+            edges_metric += 1
         else:
-            # Detour is efficient (min_detour <= alpha * direct) - edge is redundant
-            keep_mask.append(False)
-            edges_removed_by_rti += 1
+            # Semi-metric edge: shorter alternative exists
+            edges_semi_metric += 1
 
-    keep_mask = np.array(keep_mask, dtype=bool)
-
-    # Create sparsified graph
+    # Step 4: Create sparsified graph
     sparse_edge_index = torch.from_numpy(edge_index[:, keep_mask])
     sparse_data = data.clone()
     sparse_data.edge_index = sparse_edge_index
+    sparse_weights = edge_weights[keep_mask]
 
     stats = {
-        "original_edges": len(rows),
+        "original_edges": n_edges,
         "retained_edges": int(keep_mask.sum()),
         "removed_edges": int((~keep_mask).sum()),
-        "retention_ratio": float(keep_mask.sum() / len(rows)),
-        "edges_removed_by_rti": edges_removed_by_rti,
-        "edges_without_triangles": edges_without_triangles,
-        "alpha": alpha,
+        "retention_ratio": float(keep_mask.sum() / n_edges),
+        "edges_metric": edges_metric,
+        "edges_semi_metric": edges_semi_metric,
+        "epsilon": epsilon,
+        "sparse_weights": sparse_weights,
+        "keep_mask": keep_mask,
     }
 
     if verbose:
-        print(f"\nMetric Backbone Statistics:")
-        print(f"  Alpha (stretch factor): {alpha}")
-        print(f"  Original edges: {stats['original_edges']:,}")
-        print(f"  Retained edges: {stats['retained_edges']:,} " f"({stats['retention_ratio']:.1%})")
-        print(f"  Removed by RTI: {edges_removed_by_rti:,}")
-        print(f"  Kept (no triangles): {edges_without_triangles:,}")
+        print(f"\n{'='*50}")
+        print(f"Metric Backbone Results")
+        print(f"{'='*50}")
+        print(f"  Original edges:        {stats['original_edges']:,}")
+        print(f"  Metric (retained):     {stats['retained_edges']:,} ({stats['retention_ratio']:.1%})")
+        print(f"  Semi-metric (removed): {stats['removed_edges']:,}")
 
     return sparse_data, stats
 
 
-def validate_alpha_behavior(
-    data: Data, metric_scores: NDArray[np.float64], alpha_values: list = None
-) -> Dict[float, float]:
-    """Validate alpha parameter behavior for metric backbone sparsification.
-    
-    With the corrected RTI logic for dissimilarity metrics:
-    - Lower alpha = less aggressive pruning (more edges kept)
-    - Higher alpha = more aggressive pruning (fewer edges kept)
-    - alpha=1.0 keeps all edges (strictest threshold)
+def verify_geodesic_preservation(
+    original_data: Data,
+    sparse_data: Data,
+    original_weights: NDArray[np.float64],
+    sparse_weights: NDArray[np.float64],
+    n_samples: int = 500,
+    epsilon: float = 1e-6,
+    seed: int = 42,
+) -> Dict:
+    """Verify that the Metric Backbone preserves all geodesic distances.
+
+    For a valid Metric Backbone: d_B(u,v) = d_G(u,v) for all node pairs.
+
+    Args:
+        original_data: Original PyG Data object
+        sparse_data: Sparsified Metric Backbone Data object
+        original_weights: Edge weights for original graph
+        sparse_weights: Edge weights for backbone
+        n_samples: Number of random node pairs to test
+        epsilon: Tolerance for floating-point comparison
+        seed: Random seed for reproducibility
 
     Returns:
-        Dictionary mapping alpha values to retention ratios.
+        Dictionary with verification results:
+        - pairs_tested: Number of node pairs tested
+        - verified_equal: Pairs with preserved distances
+        - violations: Pairs where distances differ
+        - geodesic_preserved: Boolean indicating success
     """
-    if alpha_values is None:
-        alpha_values = [1.0, 1.5, 2.0, 5.0, 10.0]
+    def build_nx_graph(data: Data, weights: NDArray[np.float64]) -> nx.Graph:
+        """Build weighted NetworkX graph from PyG data."""
+        G = nx.Graph()
+        G.add_nodes_from(range(data.num_nodes))
+        edge_index = data.edge_index.cpu().numpy()
+        for idx, (u, v) in enumerate(zip(edge_index[0], edge_index[1])):
+            if u < v:
+                w = weights[idx]
+                if G.has_edge(u, v):
+                    G[u][v]['weight'] = min(G[u][v]['weight'], w)
+                else:
+                    G.add_edge(u, v, weight=w)
+        return G
 
-    results = {}
-    for alpha in alpha_values:
-        sparse_data, stats = metric_backbone_sparsify(
-            data, metric_scores, alpha=alpha, verbose=False
-        )
-        results[alpha] = stats["retention_ratio"]
+    G_original = build_nx_graph(original_data, original_weights)
+    G_backbone = build_nx_graph(sparse_data, sparse_weights)
 
-    # Validation checks
-    # With dissimilarity metrics: alpha=1.0 should keep most/all edges
-    # (only edges where min_detour > direct are removed at alpha=1.0)
-    
-    # Check monotonicity: larger alpha should remove MORE edges (lower retention)
-    alpha_sorted = sorted(alpha_values)
-    for i in range(len(alpha_sorted) - 1):
-        assert (
-            results[alpha_sorted[i]] >= results[alpha_sorted[i + 1]]
-        ), f"Retention should decrease with alpha: {alpha_sorted[i]} vs {alpha_sorted[i+1]}"
+    # Sample random node pairs
+    rng = np.random.default_rng(seed)
+    n = original_data.num_nodes
+    pairs = set()
+    while len(pairs) < n_samples:
+        u, v = rng.integers(0, n, size=2)
+        if u != v:
+            pairs.add((min(u, v), max(u, v)))
+    pairs = list(pairs)
 
-    return results
+    violations = []
+    verified = 0
+    unreachable_original = 0
+    unreachable_backbone = 0
+
+    for u, v in pairs:
+        try:
+            d_orig = nx.shortest_path_length(G_original, u, v, weight='weight')
+        except nx.NetworkXNoPath:
+            unreachable_original += 1
+            continue
+
+        try:
+            d_back = nx.shortest_path_length(G_backbone, u, v, weight='weight')
+        except nx.NetworkXNoPath:
+            unreachable_backbone += 1
+            violations.append((u, v, d_orig, float('inf'), float('inf')))
+            continue
+
+        diff = abs(d_orig - d_back)
+        if diff > epsilon:
+            violations.append((u, v, d_orig, d_back, diff))
+        else:
+            verified += 1
+
+    return {
+        "pairs_tested": len(pairs),
+        "verified_equal": verified,
+        "violations": len(violations),
+        "unreachable_original": unreachable_original,
+        "unreachable_backbone": unreachable_backbone,
+        "max_violation": max([v[4] for v in violations]) if violations else 0.0,
+        "geodesic_preserved": len(violations) == 0,
+        "violation_details": violations[:5],
+    }

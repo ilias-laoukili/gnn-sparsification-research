@@ -6,6 +6,9 @@ from .metrics import (
     calculate_jaccard_scores,
     calculate_effective_resistance_scores,
     calculate_approx_effective_resistance_scores,
+    compute_geodesic_preservation,
+    compute_topology_metrics,
+    compute_topology_preservation,
 )
 
 __all__ = [
@@ -14,4 +17,7 @@ __all__ = [
     "calculate_adamic_adar_scores",
     "calculate_effective_resistance_scores",
     "calculate_approx_effective_resistance_scores",
+    "compute_geodesic_preservation",
+    "compute_topology_metrics",
+    "compute_topology_preservation",
 ]

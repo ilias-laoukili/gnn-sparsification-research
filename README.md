@@ -5,23 +5,15 @@
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red)
 ![License](https://img.shields.io/badge/License-MIT%20%2B%20CC--BY-lightgrey)
 
-## 🚦 Project Status
+## Overview
 
-**Phase:** Research Validation (Pre-Publication)
+This project investigates graph sparsification methods for improving GNN efficiency while preserving accuracy. It focuses on **Metric Backbones** - a principled approach to edge pruning based on the Relaxed Triangle Inequality.
 
-### What Works ✅
-- ✅ Exploratory notebooks with validated results (see [`notebooks/exploratory/`](notebooks/exploratory))
-- ✅ Jaccard/Adamic-Adar similarity-based sparsification
-- ✅ Experiments on Cora, PubMed, Flickr datasets
-- ✅ Comprehensive unit tests for all sparsification methods
-- ✅ Statistical analysis tools (confidence intervals, significance tests)
-
-### What's Being Fixed 🚧
-- 🚧 True metric backbone implementation (RTI filtering) - **COMPLETED**
-- 🚧 Effective resistance approximation performance - **COMPLETED**
-- 🚧 Baseline comparison methods (degree, betweenness, DropEdge) - **COMPLETED**
-- 🚧 Unit tests and CI/CD pipeline - **IN PROGRESS**
-- 🚧 Statistical significance testing - **COMPLETED**
+### Features
+- Jaccard/Adamic-Adar similarity-based sparsification
+- Effective resistance (spectral) methods
+- Experiments on Cora, PubMed, Flickr datasets
+- Statistical analysis tools
 
 ### How to Reproduce Results
 
@@ -44,14 +36,14 @@ This repository contains the research work for the **Projet TREMPLIN RECHERCHE 2
 
 The primary goal of this project is to investigate the trade-off between Graph Neural Network (GNN) performance and computational efficiency by sparsifying graphs using various methods, specifically focusing on **Metric Backbones**. We aim to reduce the number of edges in the graph (compression) while maintaining high classification accuracy (performance).
 
-## 🎯 Research Objectives
+## Research Objectives
 
 - **Compare** different graph sparsification methods (Metric-based vs. Random baseline).
 - **Analyze** the impact of sparsification on GNN accuracy and training time.
 - **Identify** optimal sparsification ratios for different datasets (Citation vs. Social).
 - **Understand** the topological properties preserved by different metrics (Jaccard vs. Adamic-Adar).
 
-## 📐 Methodology
+## Methodology
 
 We investigate multiple sparsification approaches based on the **Metric Backbone** framework (Relaxed Triangle Inequality):
 
@@ -74,23 +66,19 @@ $$R_{eff}(u,v) = L^+_{uu} + L^+_{vv} - 2L^+_{uv}$$
 ### 4. Random Baseline
 Random edge removal to establish a performance lower bound.
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```text
 gnn-sparsification-research/
 ├── notebooks/
-│   └── exploratory/      # ✅ CORE RESEARCH EXPERIMENTS
-│       ├── 01_exp_jaccard_sparsification_cora.ipynb
-│       ├── 02_exp_jaccard_sparsification_pubmed.ipynb
-│       └── 03_exp_adamic_adar_sparsification_flickr.ipynb
-├── src/                  # (In Progress) Modular source code
-├── scripts/              # (In Progress) Training scripts
-├── configs/              # (In Progress) Hydra configs
-├── docs/                 # Documentation & Reports
+│   └── exploratory/      # Research experiments
+├── src/                  # Source code
+├── scripts/              # Training scripts
+├── configs/              # Hydra configs
 └── tests/                # Unit tests
 ```
 
-## 🚀 Reproducing Research Results
+## Reproducing Results
 
 The research experiments are available as standalone Jupyter Notebooks. To replicate the findings:
 
@@ -127,7 +115,7 @@ jupyter notebook notebooks/exploratory/
 - **Method:** Adamic-Adar Metric Backbone.
 - **Engineering:** Achieved **1000x speedup** in metric computation using CPU-vectorized sparse operations (`scipy.sparse`) to enable processing 900k edges on consumer hardware (Mac M4) without OOM.
 
-## 📊 Key Research Findings
+## Results
 
 | Dataset | Type | Nodes | Edges | Metric | Key Insight |
 |---------|------|-------|-------|--------|-------------|
@@ -148,39 +136,12 @@ The JLT-based approximation preserves rankings with Spearman ρ ≈ 0.80:
 
 **Note:** Approx ER is slower on small graphs but essential for large graphs where O(N³) is infeasible.
 
-## 🛠️ Development Status
+## License
 
-**Current Phase:** Transitioning from *Exploratory Notebooks* to *Modular Python Package*.
+Code is MIT licensed. See [LICENSE](LICENSE) for details.
 
-### ✅ Completed
+## Acknowledgments
 
-- [x] Validated Jaccard Metric Backbone on small dense graphs.
-- [x] Implemented Sparse Tensor algebra for medium graphs.
-- [x] Implemented Adamic-Adar Metric Backbone for social graphs.
-- [x] Optimized memory usage for Apple Silicon (MPS/M4).
-
-### 🚧 In Progress
-
-- [ ] Refactoring notebook logic into reusable `src/` modules.
-- [ ] Finalizing `Hydra` configuration integration.
-- [ ] Standardizing the `train.py` CLI entry point.
-
-### 📋 Future Work
-
-- **Spectral Methods:** Preserving graph Laplacian eigenvalues.
-- **OGB Datasets:** Scaling to millions of nodes (Arxiv, Products).
-
-## 📄 License
-
-This repository uses a **Dual License** model:
-
-1. **Code:** The source code and notebooks are licensed under the **MIT License**.
-2. **Report & Figures:** The written report (`docs/`) and generated figures are licensed under **CC-BY 4.0**.
-
-See [LICENSE](LICENSE) for details.
-
-## 🤝 Acknowledgments
-
-- **University:** Université Gustave Eiffel / LAMA
-- **Program:** Projet TREMPLIN RECHERCHE 2025/2026
-- **Tutor:** Maximilien Dreveton
+- Université Gustave Eiffel / LAMA
+- Projet TREMPLIN RECHERCHE 2025/2026
+- Tutor: Maximilien Dreveton

@@ -17,7 +17,7 @@ from .metrics import (
     calculate_effective_resistance_scores,
     calculate_approx_effective_resistance_scores,
 )
-from .metric_backbone import metric_backbone_sparsify
+from .metric_backbone import compute_metric_backbone
 
 
 class GraphSparsifier:
@@ -204,69 +204,32 @@ class GraphSparsifier:
     def sparsify_metric_backbone(
         self,
         metric: str,
-        target_retention: float,
-        alpha: float | None = None,
-        alpha_bounds: tuple[float, float] = (1.0, 6.0),
-        max_iter: int = 8,
-        tol: float = 0.02,
+        epsilon: float = 1e-9,
     ) -> tuple[Data, dict]:
-        """Sparsify using the metric backbone (RTI) to hit a retention target.
+        """Sparsify using the Global Metric Backbone (APSP-based).
+
+        The Metric Backbone preserves exact geodesic distances by keeping only
+        edges that lie on shortest paths. Unlike threshold-based methods, the
+        retention ratio is determined by the graph structure, not a parameter.
 
         Args:
-            metric: Edge scoring method (similarity). Converted internally to distances.
-            target_retention: Desired fraction of edges to keep.
-            alpha: Optional fixed alpha. If provided, binary search is skipped.
-            alpha_bounds: Search interval for alpha when tuning toward target_retention.
-            max_iter: Max binary-search iterations.
-            tol: Acceptable absolute error on retention ratio.
+            metric: Edge scoring method (similarity). Converted to distances.
+            epsilon: Floating-point tolerance for edge classification.
 
         Returns:
             (sparse_data_on_device, stats_dict) where stats contain retention_ratio.
+
+        Note:
+            The retention ratio is determined by the graph structure and cannot
+            be tuned. For target-retention sparsification, use sparsify() instead.
         """
-        if not 0 < target_retention <= 1:
-            raise ValueError(
-                f"target_retention must be in (0, 1], got {target_retention}"
-            )
-
-        if alpha_bounds[0] >= alpha_bounds[1]:
-            raise ValueError("alpha_bounds must be increasing (low, high)")
-
         distances = self._scores_to_dissimilarity(self.compute_scores(metric))
 
-        def run(alpha_value: float) -> tuple[Data, dict]:
-            sparse, stats = metric_backbone_sparsify(
-                self.data, distances, alpha=alpha_value, verbose=self.verbose
-            )
-            return sparse, stats
+        sparse_data, stats = compute_metric_backbone(
+            self.data, distances, epsilon=epsilon, verbose=self.verbose
+        )
 
-        if alpha is not None:
-            sparse_data, stats = run(alpha)
-            return sparse_data.to(self.device), stats
-
-        low, high = alpha_bounds
-        best_sparse = None
-        best_stats = None
-
-        for _ in range(max_iter):
-            mid = (low + high) / 2.0
-            sparse_data, stats = run(mid)
-            retention = stats["retention_ratio"]
-
-            if best_stats is None or abs(retention - target_retention) < abs(
-                best_stats["retention_ratio"] - target_retention
-            ):
-                best_sparse, best_stats = sparse_data, stats
-
-            if abs(retention - target_retention) <= tol:
-                break
-
-            if retention > target_retention:
-                low = mid  # need more pruning -> increase alpha
-            else:
-                high = mid  # need fewer removals -> decrease alpha
-
-        assert best_sparse is not None and best_stats is not None
-        return best_sparse.to(self.device), best_stats
+        return sparse_data.to(self.device), stats
 
     def get_retention_curve_data(
         self,

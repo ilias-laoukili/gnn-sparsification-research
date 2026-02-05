@@ -15,8 +15,9 @@ help:
 	@echo ""
 
 setup:
-	@echo "Running setup script..."
-	@bash setup.sh
+	@echo "Setting up environment..."
+	pip install -r requirements.txt
+	pip install -e .
 
 install:
 	@echo "Installing package in editable mode..."
@@ -56,8 +57,8 @@ train:
 	python scripts/train.py
 
 docs:
-	@echo "Opening documentation..."
-	@cat docs/QUICKSTART.md
+	@echo "See README.md for documentation"
+	@head -100 README.md
 
 # Specific experiment shortcuts
 train-baseline:

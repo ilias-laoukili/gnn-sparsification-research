@@ -5,10 +5,12 @@ using sparse matrix operations. All functions operate on scipy CSR matrices
 for memory efficiency on large graphs.
 """
 
+from typing import Dict, Optional, Tuple
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from numpy.typing import NDArray
+import networkx as nx
 
 
 def calculate_jaccard_scores(adj: sp.csr_matrix) -> NDArray[np.float64]:
@@ -286,3 +288,200 @@ def calculate_approx_effective_resistance_scores(
     # Ensure positive values
     r_eff = np.maximum(r_eff, 1e-10)
     return r_eff.astype(np.float64)
+
+
+def compute_geodesic_preservation(
+    original_adj: sp.csr_matrix,
+    sparse_adj: sp.csr_matrix,
+    n_samples: int = 500,
+    seed: int = 42,
+) -> Dict:
+    """Compute geodesic (shortest path) preservation ratio between original and sparse graphs.
+
+    Measures what fraction of sampled node pairs have preserved shortest path distances
+    after sparsification. This works with unweighted graphs (hop distance).
+
+    Args:
+        original_adj: Original adjacency matrix (sparse CSR).
+        sparse_adj: Sparsified adjacency matrix (sparse CSR).
+        n_samples: Number of random node pairs to sample.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        Dictionary with:
+        - preservation_ratio: Fraction of pairs with preserved distances [0, 1]
+        - pairs_tested: Number of node pairs tested
+        - preserved_count: Number of pairs with same distance
+        - increased_count: Number of pairs with increased distance
+        - disconnected_count: Number of pairs disconnected in sparse graph
+        - avg_distance_increase: Average increase in distance for non-preserved pairs
+    """
+    n = original_adj.shape[0]
+    rng = np.random.default_rng(seed)
+
+    # Build NetworkX graphs for shortest path computation
+    G_orig = nx.from_scipy_sparse_array(original_adj)
+    G_sparse = nx.from_scipy_sparse_array(sparse_adj)
+
+    # Sample random node pairs
+    pairs = set()
+    max_attempts = n_samples * 10
+    attempts = 0
+    while len(pairs) < n_samples and attempts < max_attempts:
+        u, v = rng.integers(0, n, size=2)
+        if u != v:
+            pairs.add((min(u, v), max(u, v)))
+        attempts += 1
+    pairs = list(pairs)
+
+    preserved = 0
+    increased = 0
+    disconnected = 0
+    distance_increases = []
+
+    for u, v in pairs:
+        # Get original distance
+        try:
+            d_orig = nx.shortest_path_length(G_orig, u, v)
+        except nx.NetworkXNoPath:
+            # Already disconnected in original - skip
+            continue
+
+        # Get sparse distance
+        try:
+            d_sparse = nx.shortest_path_length(G_sparse, u, v)
+        except nx.NetworkXNoPath:
+            disconnected += 1
+            continue
+
+        if d_sparse == d_orig:
+            preserved += 1
+        else:
+            increased += 1
+            distance_increases.append(d_sparse - d_orig)
+
+    total_valid = preserved + increased + disconnected
+    preservation_ratio = preserved / total_valid if total_valid > 0 else 0.0
+
+    return {
+        "preservation_ratio": preservation_ratio,
+        "pairs_tested": len(pairs),
+        "preserved_count": preserved,
+        "increased_count": increased,
+        "disconnected_count": disconnected,
+        "avg_distance_increase": np.mean(distance_increases) if distance_increases else 0.0,
+        "max_distance_increase": max(distance_increases) if distance_increases else 0,
+    }
+
+
+def compute_topology_metrics(adj: sp.csr_matrix) -> Dict:
+    """Compute topological metrics for a graph.
+
+    Args:
+        adj: Adjacency matrix (sparse CSR).
+
+    Returns:
+        Dictionary with:
+        - num_nodes: Number of nodes
+        - num_edges: Number of edges (undirected count)
+        - avg_degree: Average node degree
+        - clustering_coefficient: Global clustering coefficient
+        - algebraic_connectivity: Second smallest eigenvalue of Laplacian (Fiedler value)
+        - num_connected_components: Number of connected components
+        - largest_component_ratio: Fraction of nodes in largest component
+    """
+    n = adj.shape[0]
+    G = nx.from_scipy_sparse_array(adj)
+
+    # Basic stats
+    num_edges = G.number_of_edges()
+    degrees = np.array([d for _, d in G.degree()])
+    avg_degree = degrees.mean() if len(degrees) > 0 else 0.0
+
+    # Clustering coefficient
+    clustering = nx.average_clustering(G)
+
+    # Connected components
+    components = list(nx.connected_components(G))
+    num_components = len(components)
+    largest_component_size = max(len(c) for c in components) if components else 0
+    largest_component_ratio = largest_component_size / n if n > 0 else 0.0
+
+    # Algebraic connectivity (Fiedler value) - only for connected graphs
+    # For disconnected graphs, use the largest connected component
+    algebraic_connectivity = 0.0
+    if num_components == 1 and n > 1:
+        try:
+            algebraic_connectivity = nx.algebraic_connectivity(G, method='tracemin_lu')
+        except Exception:
+            # Fall back to computing from Laplacian eigenvalues
+            try:
+                L = nx.laplacian_matrix(G).astype(np.float64)
+                # Get second smallest eigenvalue
+                eigenvalues = spla.eigsh(L, k=min(2, n-1), which='SM', return_eigenvectors=False)
+                algebraic_connectivity = float(sorted(eigenvalues)[1]) if len(eigenvalues) > 1 else 0.0
+            except Exception:
+                algebraic_connectivity = 0.0
+    elif num_components > 1:
+        # For disconnected graphs, algebraic connectivity is 0
+        algebraic_connectivity = 0.0
+
+    return {
+        "num_nodes": n,
+        "num_edges": num_edges,
+        "avg_degree": avg_degree,
+        "clustering_coefficient": clustering,
+        "algebraic_connectivity": algebraic_connectivity,
+        "num_connected_components": num_components,
+        "largest_component_ratio": largest_component_ratio,
+    }
+
+
+def compute_topology_preservation(
+    original_adj: sp.csr_matrix,
+    sparse_adj: sp.csr_matrix,
+) -> Dict:
+    """Compute how well topology is preserved after sparsification.
+
+    Args:
+        original_adj: Original adjacency matrix (sparse CSR).
+        sparse_adj: Sparsified adjacency matrix (sparse CSR).
+
+    Returns:
+        Dictionary with preservation ratios and absolute changes:
+        - edge_retention: Fraction of edges retained
+        - clustering_preservation: sparse_cc / original_cc
+        - connectivity_preservation: sparse_ac / original_ac (or 0 if disconnected)
+        - component_change: Change in number of connected components
+        - original_metrics: Full metrics for original graph
+        - sparse_metrics: Full metrics for sparse graph
+    """
+    orig_metrics = compute_topology_metrics(original_adj)
+    sparse_metrics = compute_topology_metrics(sparse_adj)
+
+    # Edge retention
+    edge_retention = sparse_metrics["num_edges"] / orig_metrics["num_edges"] if orig_metrics["num_edges"] > 0 else 0.0
+
+    # Clustering preservation
+    clustering_preservation = (
+        sparse_metrics["clustering_coefficient"] / orig_metrics["clustering_coefficient"]
+        if orig_metrics["clustering_coefficient"] > 0 else 1.0
+    )
+
+    # Algebraic connectivity preservation
+    connectivity_preservation = (
+        sparse_metrics["algebraic_connectivity"] / orig_metrics["algebraic_connectivity"]
+        if orig_metrics["algebraic_connectivity"] > 0 else 0.0
+    )
+
+    # Component change
+    component_change = sparse_metrics["num_connected_components"] - orig_metrics["num_connected_components"]
+
+    return {
+        "edge_retention": edge_retention,
+        "clustering_preservation": clustering_preservation,
+        "connectivity_preservation": connectivity_preservation,
+        "component_change": component_change,
+        "original_metrics": orig_metrics,
+        "sparse_metrics": sparse_metrics,
+    }
