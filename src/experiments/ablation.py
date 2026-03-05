@@ -4,21 +4,29 @@ This module implements the four-scenario ablation methodology to disentangle
 the effects of graph structure (sparsification) from edge information (weighting).
 """
 
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import psutil
+import scipy.sparse as sp
 import torch
 from torch import Tensor
 from torch_geometric.data import Data
-import time
 
-from ..models.gnn import BaseGNN, get_model
+from ..models.gnn import EDGE_WEIGHT_MODELS, BaseGNN, get_model
 from ..sparsification.core import GraphSparsifier
+from ..sparsification.metrics import compute_topology_metrics
 from ..training.trainer import GNNTrainer
 from ..utils.seeds import set_global_seed
+
+
+def _get_process_memory_mb() -> float:
+    """Get current process RSS memory in MB (works on all platforms)."""
+    return psutil.Process().memory_info().rss / (1024 * 1024)
 
 
 class ExperimentScenario(Enum):
@@ -42,24 +50,13 @@ class ExperimentScenario(Enum):
 
 @dataclass
 class ExperimentResult:
-    """Container for a single experiment run's results.
-
-    Args:
-        scenario: The experimental scenario (A, B, C, or D).
-        accuracy: Test set accuracy achieved.
-        epochs_trained: Number of epochs before stopping.
-        best_val_acc: Best validation accuracy during training.
-        num_edges: Number of edges in the graph used.
-        preprocessing_time_sec: Total time for preprocessing (sparsify + weights).
-        sparsification_time_sec: Time spent on graph sparsification only.
-        weight_computation_time_sec: Time spent computing edge weights only.
-        training_time_sec: Wall-clock training time for this run.
-        peak_memory_mb: Peak GPU memory allocated (if CUDA), else 0.
-        actual_retention: Actual edge retention ratio achieved.
-    """
+    """Container for a single experiment run's results."""
 
     scenario: ExperimentScenario
     accuracy: float
+    macro_f1: float
+    macro_precision: float
+    macro_recall: float
     epochs_trained: int
     best_val_acc: float
     num_edges: int
@@ -67,8 +64,11 @@ class ExperimentResult:
     sparsification_time_sec: float
     weight_computation_time_sec: float
     training_time_sec: float
+    total_time_sec: float
     peak_memory_mb: float
     actual_retention: float = 1.0
+    clustering_coeff: float = 0.0
+    algebraic_connectivity: float = 0.0
 
 
 class AblationStudy:
@@ -157,6 +157,8 @@ class AblationStudy:
         sparsification_time_sec: float = 0.0,
         weight_computation_time_sec: float = 0.0,
         actual_retention: float = 1.0,
+        clustering_coeff: float = 0.0,
+        algebraic_connectivity: float = 0.0,
         **model_kwargs,
     ) -> ExperimentResult:
         """Execute a single experimental scenario."""
@@ -173,10 +175,8 @@ class AblationStudy:
         optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=5e-4)
         trainer = GNNTrainer(model, optimizer, device=self.device)
 
-        # Track peak CUDA memory
-        peak_memory_mb = 0.0
-        if torch.cuda.is_available() and self.device.startswith("cuda"):
-            torch.cuda.reset_peak_memory_stats()
+        # Track memory: use psutil (works on all platforms)
+        mem_before = _get_process_memory_mb()
 
         # Measure training wall time
         train_start = time.time()
@@ -189,15 +189,20 @@ class AblationStudy:
         train_end = time.time()
         training_time_sec = train_end - train_start
 
-        if torch.cuda.is_available() and self.device.startswith("cuda"):
-            peak_bytes = torch.cuda.max_memory_allocated()
-            peak_memory_mb = float(peak_bytes) / (1024.0 * 1024.0)
+        mem_after = _get_process_memory_mb()
+        peak_memory_mb = max(mem_after - mem_before, 0.0)
 
         preprocessing_time_sec = sparsification_time_sec + weight_computation_time_sec
+        total_time_sec = preprocessing_time_sec + training_time_sec
+
+        test_metrics = history.get("test_metrics", {})
 
         return ExperimentResult(
             scenario=scenario,
             accuracy=accuracy,
+            macro_f1=test_metrics.get("macro_f1", 0.0),
+            macro_precision=test_metrics.get("macro_precision", 0.0),
+            macro_recall=test_metrics.get("macro_recall", 0.0),
             epochs_trained=history["epochs_trained"],
             best_val_acc=history["best_val_acc"],
             num_edges=exp_data.edge_index.size(1),
@@ -205,9 +210,64 @@ class AblationStudy:
             sparsification_time_sec=sparsification_time_sec,
             weight_computation_time_sec=weight_computation_time_sec,
             training_time_sec=training_time_sec,
+            total_time_sec=total_time_sec,
             peak_memory_mb=peak_memory_mb,
             actual_retention=actual_retention,
+            clustering_coeff=clustering_coeff,
+            algebraic_connectivity=algebraic_connectivity,
         )
+
+    def _do_sparsify(
+        self,
+        metric: str,
+        retention_ratio: float,
+        *,
+        use_metric_backbone: bool = False,
+        keep_lowest: bool = False,
+        sparsification_mode: str = "threshold",
+        seed: int = 42,
+    ) -> Tuple[Data, float]:
+        """Dispatch to the appropriate sparsification method.
+
+        Centralizes the sparsification call so that run_full_study and
+        run_multi_config_study share the same routing logic.
+
+        Args:
+            metric: Edge scoring metric.
+            retention_ratio: Target retention (ignored for backbone).
+            use_metric_backbone: Use APSP-based metric backbone.
+            keep_lowest: Keep lowest-scoring edges (inverse control).
+            sparsification_mode: One of "threshold", "sampled", "degree_aware".
+            seed: Random seed (used by sampled mode).
+
+        Returns:
+            (sparse_data, actual_retention_ratio)
+        """
+        original_num_edges = self.data.edge_index.size(1)
+
+        if use_metric_backbone:
+            sparse_data, backbone_stats = self.sparsifier.sparsify_metric_backbone(
+                metric=metric,
+            )
+            actual_retention = backbone_stats["retention_ratio"]
+        elif sparsification_mode == "sampled":
+            sparse_data = self.sparsifier.sparsify_sampled(
+                metric, retention_ratio, seed=seed,
+            )
+            actual_retention = sparse_data.edge_index.size(1) / original_num_edges
+        elif sparsification_mode == "degree_aware":
+            sparse_data = self.sparsifier.sparsify_degree_aware(
+                metric, retention_ratio, min_edges_per_node=1,
+            )
+            actual_retention = sparse_data.edge_index.size(1) / original_num_edges
+        else:
+            # Default: deterministic threshold (top-k / bottom-k)
+            sparse_data = self.sparsifier.sparsify(
+                metric, retention_ratio, keep_lowest=keep_lowest,
+            )
+            actual_retention = sparse_data.edge_index.size(1) / original_num_edges
+
+        return sparse_data, actual_retention
 
     def run_full_study(
         self,
@@ -219,9 +279,12 @@ class AblationStudy:
         patience: int = 20,
         seed: int = 42,
         use_metric_backbone: Optional[bool] = None,
+        skip_weighted: bool = False,
+        keep_lowest: bool = False,
+        sparsification_mode: str = "threshold",
         **model_kwargs,
     ) -> pd.DataFrame:
-        """Execute all four scenarios of the ablation study.
+        """Execute scenarios of the ablation study.
 
         Args:
             model_name: GNN architecture ('gcn', 'sage', 'gat').
@@ -233,6 +296,9 @@ class AblationStudy:
             patience: Early stopping patience.
             seed: Random seed for reproducibility.
             use_metric_backbone: Override instance setting for metric backbone usage.
+            skip_weighted: If True, skip scenarios C and D (weighted).
+                          Use for Random baseline where weights are meaningless.
+            keep_lowest: If True, keep lowest-scoring edges (control experiment).
             **model_kwargs: Additional model arguments (e.g., heads for GAT).
 
         Returns:
@@ -240,40 +306,67 @@ class AblationStudy:
         """
         self.results = []
 
-        backbone_flag = self.use_metric_backbone if use_metric_backbone is None else use_metric_backbone
-        original_num_edges = self.data.edge_index.size(1)
+        # Auto-skip weighted scenarios for models that don't support edge_weight
+        if model_name.lower() not in EDGE_WEIGHT_MODELS:
+            skip_weighted = True
+
+        backbone_flag = (
+            self.use_metric_backbone if use_metric_backbone is None else use_metric_backbone
+        )
 
         # Measure sparsification time separately
         sparsify_start = time.time()
-        if backbone_flag:
-            # Global Metric Backbone: retention is determined by graph structure
-            sparse_data, backbone_stats = self.sparsifier.sparsify_metric_backbone(
-                metric=metric,
-            )
-            actual_retention = backbone_stats['retention_ratio']
-            if self.verbose:
-                print(f"Metric backbone retention: {actual_retention:.1%}")
-        else:
-            sparse_data = self.sparsifier.sparsify(metric, retention_ratio)
-            actual_retention = sparse_data.edge_index.size(1) / original_num_edges
-        sparsify_end = time.time()
-        sparsification_time_sec = sparsify_end - sparsify_start
+        sparse_data, actual_retention = self._do_sparsify(
+            metric=metric,
+            retention_ratio=retention_ratio,
+            use_metric_backbone=backbone_flag,
+            keep_lowest=keep_lowest,
+            sparsification_mode=sparsification_mode,
+            seed=seed,
+        )
+        if self.verbose and backbone_flag:
+            print(f"Metric backbone retention: {actual_retention:.1%}")
+        sparsification_time_sec = time.time() - sparsify_start
 
-        # Measure weight computation time separately
+        # Compute edge weights only when needed (scenarios C/D)
         weight_start = time.time()
-        full_weights = self.compute_edge_weights(self.data, metric)
-        sparse_weights = self.compute_edge_weights(sparse_data, metric)
+        if not skip_weighted:
+            full_weights = self.compute_edge_weights(self.data, metric)
+            sparse_weights = self.compute_edge_weights(sparse_data, metric)
+        else:
+            full_weights = None
+            sparse_weights = None
         weight_end = time.time()
         weight_computation_time_sec = weight_end - weight_start
 
-        scenarios_config = [
-            (ExperimentScenario.A_FULL_BINARY, self.data, None, 1.0),
-            (ExperimentScenario.B_SPARSE_BINARY, sparse_data, None, actual_retention),
-            (ExperimentScenario.C_FULL_WEIGHTED, self.data, full_weights, 1.0),
-            (ExperimentScenario.D_SPARSE_WEIGHTED, sparse_data, sparse_weights, actual_retention),
-        ]
+        # Compute topology metrics for full and sparse graphs (once per study)
+        full_topo = compute_topology_metrics(self.sparsifier.adj)
+        sparse_ei = sparse_data.edge_index.cpu().numpy()
+        sparse_adj = sp.csr_matrix(
+            (np.ones(sparse_ei.shape[1]), (sparse_ei[0], sparse_ei[1])),
+            shape=(self.data.num_nodes, self.data.num_nodes),
+        )
+        sparse_topo = compute_topology_metrics(sparse_adj)
 
-        for scenario, exp_data, edge_weight, scenario_retention in scenarios_config:
+        scenarios_config = [
+            (ExperimentScenario.A_FULL_BINARY, self.data, None, 1.0, full_topo),
+            (ExperimentScenario.B_SPARSE_BINARY, sparse_data, None, actual_retention, sparse_topo),
+        ]
+        if not skip_weighted:
+            scenarios_config.extend(
+                [
+                    (ExperimentScenario.C_FULL_WEIGHTED, self.data, full_weights, 1.0, full_topo),
+                    (
+                        ExperimentScenario.D_SPARSE_WEIGHTED,
+                        sparse_data,
+                        sparse_weights,
+                        actual_retention,
+                        sparse_topo,
+                    ),
+                ]
+            )
+
+        for scenario, exp_data, edge_weight, scenario_retention, topo in scenarios_config:
             if self.verbose:
                 print(f"Running {scenario.value}...")
             result = self._run_single_experiment(
@@ -288,6 +381,8 @@ class AblationStudy:
                 sparsification_time_sec=sparsification_time_sec,
                 weight_computation_time_sec=weight_computation_time_sec,
                 actual_retention=scenario_retention,
+                clustering_coeff=topo.get("clustering_coefficient", 0.0),
+                algebraic_connectivity=topo.get("algebraic_connectivity", 0.0),
                 **model_kwargs,
             )
             self.results.append(result)
@@ -306,6 +401,9 @@ class AblationStudy:
             {
                 "Scenario": r.scenario.value,
                 "Accuracy": r.accuracy,
+                "MacroF1": r.macro_f1,
+                "MacroPrecision": r.macro_precision,
+                "MacroRecall": r.macro_recall,
                 "Epochs": r.epochs_trained,
                 "BestValAcc": r.best_val_acc,
                 "Edges": r.num_edges,
@@ -314,7 +412,10 @@ class AblationStudy:
                 "SparsifySec": r.sparsification_time_sec,
                 "WeightSec": r.weight_computation_time_sec,
                 "TrainSec": r.training_time_sec,
+                "TotalTimeSec": r.total_time_sec,
                 "PeakMemMB": r.peak_memory_mb,
+                "ClusteringCoeff": r.clustering_coeff,
+                "AlgebraicConnectivity": r.algebraic_connectivity,
             }
             for r in self.results
         ]
@@ -421,8 +522,14 @@ class AblationStudy:
         patience: int = 20,
         seeds: List[int] = [42],
         use_metric_backbone: Optional[bool] = None,
+        skip_weighted: bool = False,
+        keep_lowest: bool = False,
+        sparsification_mode: str = "threshold",
     ) -> pd.DataFrame:
         """Run ablation study across multiple configurations and seeds.
+
+        Precomputes sparsification, weights, and topology per (metric, retention)
+        to avoid redundant computation across models and seeds.
 
         Args:
             model_names: List of model architectures to test.
@@ -434,30 +541,120 @@ class AblationStudy:
             patience: Early stopping patience.
             seeds: List of random seeds for reproducibility.
             use_metric_backbone: If True, use global metric backbone (ignores retention_ratios).
+            skip_weighted: If True, skip scenarios C and D (weighted).
+            keep_lowest: If True, keep lowest-scoring edges (control experiment).
 
         Returns:
             DataFrame with all results including config columns.
         """
         all_results = []
+        backbone_flag = (
+            self.use_metric_backbone if use_metric_backbone is None else use_metric_backbone
+        )
+        original_num_edges = self.data.edge_index.size(1)
 
-        for model_name in model_names:
-            for metric in metrics:
-                for retention in retention_ratios:
+        # Full-graph topology (constant across all configs)
+        full_topo = compute_topology_metrics(self.sparsifier.adj)
+
+        for metric in metrics:
+            # Full-graph weights depend only on metric (compute once)
+            full_weights_cache = None
+
+            for retention in retention_ratios:
+                # --- Precompute per (metric, retention) ---
+                sparsify_start = time.time()
+                sparse_data, actual_retention = self._do_sparsify(
+                    metric=metric,
+                    retention_ratio=retention,
+                    use_metric_backbone=backbone_flag,
+                    keep_lowest=keep_lowest,
+                    sparsification_mode=sparsification_mode,
+                    seed=seeds[0] if seeds else 42,
+                )
+                sparsification_time_sec = time.time() - sparsify_start
+
+                # Sparse topology (same for all models/seeds at this retention)
+                sparse_ei = sparse_data.edge_index.cpu().numpy()
+                sparse_adj = sp.csr_matrix(
+                    (np.ones(sparse_ei.shape[1]), (sparse_ei[0], sparse_ei[1])),
+                    shape=(self.data.num_nodes, self.data.num_nodes),
+                )
+                sparse_topo = compute_topology_metrics(sparse_adj)
+
+                for model_name in model_names:
+                    # Determine if this model needs weighted scenarios
+                    model_skip_weighted = skip_weighted or (
+                        model_name.lower() not in EDGE_WEIGHT_MODELS
+                    )
+
+                    # Compute weights only when needed, cache full-graph weights
+                    weight_start = time.time()
+                    if not model_skip_weighted:
+                        if full_weights_cache is None:
+                            full_weights_cache = self.compute_edge_weights(self.data, metric)
+                        full_weights = full_weights_cache
+                        sparse_weights = self.compute_edge_weights(sparse_data, metric)
+                    else:
+                        full_weights = None
+                        sparse_weights = None
+                    weight_computation_time_sec = time.time() - weight_start
+
+                    # Build scenario list
+                    scenarios_config = [
+                        (ExperimentScenario.A_FULL_BINARY, self.data, None, 1.0, full_topo),
+                        (
+                            ExperimentScenario.B_SPARSE_BINARY,
+                            sparse_data,
+                            None,
+                            actual_retention,
+                            sparse_topo,
+                        ),
+                    ]
+                    if not model_skip_weighted:
+                        scenarios_config.extend(
+                            [
+                                (
+                                    ExperimentScenario.C_FULL_WEIGHTED,
+                                    self.data,
+                                    full_weights,
+                                    1.0,
+                                    full_topo,
+                                ),
+                                (
+                                    ExperimentScenario.D_SPARSE_WEIGHTED,
+                                    sparse_data,
+                                    sparse_weights,
+                                    actual_retention,
+                                    sparse_topo,
+                                ),
+                            ]
+                        )
+
                     for seed in seeds:
                         print(f"\n{'='*60}")
                         print(f"Config: {model_name} | {metric} | {retention:.0%} | Seed: {seed}")
                         print(f"{'='*60}")
 
-                        df = self.run_full_study(
-                            model_name=model_name,
-                            metric=metric,
-                            retention_ratio=retention,
-                            hidden_channels=hidden_channels,
-                            epochs=epochs,
-                            patience=patience,
-                            seed=seed,
-                            use_metric_backbone=use_metric_backbone,
-                        )
+                        self.results = []
+                        for scenario, exp_data, edge_weight, s_ret, topo in scenarios_config:
+                            result = self._run_single_experiment(
+                                scenario=scenario,
+                                exp_data=exp_data,
+                                edge_weight=edge_weight,
+                                model_name=model_name,
+                                hidden_channels=hidden_channels,
+                                epochs=epochs,
+                                patience=patience,
+                                seed=seed,
+                                sparsification_time_sec=sparsification_time_sec,
+                                weight_computation_time_sec=weight_computation_time_sec,
+                                actual_retention=s_ret,
+                                clustering_coeff=topo.get("clustering_coefficient", 0.0),
+                                algebraic_connectivity=topo.get("algebraic_connectivity", 0.0),
+                            )
+                            self.results.append(result)
+
+                        df = self.results_to_dataframe()
                         df["Model"] = model_name
                         df["Metric"] = metric
                         df["Retention"] = retention

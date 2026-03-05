@@ -4,9 +4,9 @@ This module centralizes lightweight data-processing helpers so notebooks
 can stay focused on visualization and reporting.
 """
 
-from collections import Counter
 import os
-from typing import Dict, TYPE_CHECKING
+from collections import Counter
+from typing import TYPE_CHECKING, Dict
 
 import pandas as pd
 import torch
@@ -14,22 +14,34 @@ from torch_geometric.data import Data
 
 # Use TYPE_CHECKING to avoid circular imports at runtime
 if TYPE_CHECKING:
-    from ..experiments import AblationStudy
     from ..data import DatasetLoader
+    from ..experiments import AblationStudy
 
 
 def compute_effects(df_subset: pd.DataFrame) -> Dict[str, float]:
-    """Decompose structure/weighting/interaction effects for a scenario row set."""
-    a = df_subset[df_subset["Scenario"] == "A: Full + Binary"]["Accuracy"].values[0]
-    b = df_subset[df_subset["Scenario"] == "B: Sparse + Binary"]["Accuracy"].values[0]
-    c = df_subset[df_subset["Scenario"] == "C: Full + Weighted"]["Accuracy"].values[0]
-    d = df_subset[df_subset["Scenario"] == "D: Sparse + Weighted"]["Accuracy"].values[0]
+    """Decompose structure/weighting/interaction effects for a scenario row set.
+
+    Handles subsets with only A/B scenarios (e.g. Random, InverseThreshold,
+    or models that don't support edge weights). Returns NaN for missing effects.
+    """
+    a_rows = df_subset[df_subset["Scenario"] == "A: Full + Binary"]["Accuracy"]
+    b_rows = df_subset[df_subset["Scenario"] == "B: Sparse + Binary"]["Accuracy"]
+    c_rows = df_subset[df_subset["Scenario"] == "C: Full + Weighted"]["Accuracy"]
+    d_rows = df_subset[df_subset["Scenario"] == "D: Sparse + Weighted"]["Accuracy"]
+
+    a = a_rows.values[0] if len(a_rows) > 0 else float("nan")
+    b = b_rows.values[0] if len(b_rows) > 0 else float("nan")
+    c = c_rows.values[0] if len(c_rows) > 0 else float("nan")
+    d = d_rows.values[0] if len(d_rows) > 0 else float("nan")
+
     return {
         "Baseline (A)": a,
         "Structure Effect (B-A)": b - a,
-        "Weighting Effect (C-A)": c - a,
-        "Combined Effect (D-A)": d - a,
-        "Interaction (D-B-C+A)": d - b - c + a,
+        "Weighting Effect (C-A)": c - a if not (pd.isna(c) or pd.isna(a)) else float("nan"),
+        "Combined Effect (D-A)": d - a if not (pd.isna(d) or pd.isna(a)) else float("nan"),
+        "Interaction (D-B-C+A)": (
+            d - b - c + a if not any(pd.isna(x) for x in [a, b, c, d]) else float("nan")
+        ),
     }
 
 

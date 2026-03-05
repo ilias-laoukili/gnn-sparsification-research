@@ -1,17 +1,19 @@
-import pandas as pd
+from typing import Any, Dict, List, Optional
+
 import numpy as np
-from typing import Dict, Any, Optional, List
+import pandas as pd
+
 
 def print_text_table(
     data: Dict[str, Dict[str, Any]],
     title: str = "Statistics",
     float_fmt: str = "{:.4f}",
     col_width: int = 15,
-    index_width: int = 25
+    index_width: int = 25,
 ) -> None:
     """
     Prints a formatted text table from a dictionary of statistics.
-    
+
     Args:
         data: Dictionary where keys are column headers (e.g. Dataset names)
               and values are dictionaries of {metric_name: value}.
@@ -25,7 +27,7 @@ def print_text_table(
         return
 
     columns = list(data.keys())
-    
+
     # Collect all unique metrics to ensure we cover everything
     metrics = []
     seen = set()
@@ -37,14 +39,14 @@ def print_text_table(
 
     # Calculate total width
     total_width = index_width + (col_width * len(columns))
-    
+
     separator = "*" * total_width
-    
+
     if title:
         print(f" {title} ".center(total_width, "*"))
     else:
         print(separator)
-    
+
     # Print Headers
     header = f"{'Metric':<{index_width}}" + "".join([f"{c:>{col_width}}" for c in columns])
     print(header)

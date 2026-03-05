@@ -25,6 +25,11 @@ def set_global_seed(seed: int = 42) -> None:
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+    # MPS (Apple Metal) — must be seeded separately; torch.manual_seed() does
+    # not propagate to the MPS backend in PyTorch 2.x.
+    if hasattr(torch, "mps") and torch.backends.mps.is_available():
+        torch.mps.manual_seed(seed)
+
     # Ensure deterministic behavior for cuDNN
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False

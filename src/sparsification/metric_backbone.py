@@ -17,11 +17,12 @@ References:
 """
 
 from typing import Dict, Tuple
-import numpy as np
-from numpy.typing import NDArray
+
 import networkx as nx
-from torch_geometric.data import Data
+import numpy as np
 import torch
+from numpy.typing import NDArray
+from torch_geometric.data import Data
 
 
 def compute_metric_backbone(
@@ -73,7 +74,7 @@ def compute_metric_backbone(
         weight = edge_weights[idx]
         if u < v:  # Undirected: add each edge once
             if G.has_edge(u, v):
-                G[u][v]['weight'] = min(G[u][v]['weight'], weight)
+                G[u][v]["weight"] = min(G[u][v]["weight"], weight)
             else:
                 G.add_edge(u, v, weight=weight)
 
@@ -82,7 +83,7 @@ def compute_metric_backbone(
         print(f"  Computing APSP via Dijkstra... ", end="", flush=True)
 
     # Step 2: Compute All-Pairs Shortest Paths
-    dist_matrix = dict(nx.all_pairs_dijkstra_path_length(G, weight='weight'))
+    dist_matrix = dict(nx.all_pairs_dijkstra_path_length(G, weight="weight"))
 
     if verbose:
         print("Done!")
@@ -132,7 +133,9 @@ def compute_metric_backbone(
         print(f"Metric Backbone Results")
         print(f"{'='*50}")
         print(f"  Original edges:        {stats['original_edges']:,}")
-        print(f"  Metric (retained):     {stats['retained_edges']:,} ({stats['retention_ratio']:.1%})")
+        print(
+            f"  Metric (retained):     {stats['retained_edges']:,} ({stats['retention_ratio']:.1%})"
+        )
         print(f"  Semi-metric (removed): {stats['removed_edges']:,}")
 
     return sparse_data, stats
@@ -167,6 +170,7 @@ def verify_geodesic_preservation(
         - violations: Pairs where distances differ
         - geodesic_preserved: Boolean indicating success
     """
+
     def build_nx_graph(data: Data, weights: NDArray[np.float64]) -> nx.Graph:
         """Build weighted NetworkX graph from PyG data."""
         G = nx.Graph()
@@ -176,7 +180,7 @@ def verify_geodesic_preservation(
             if u < v:
                 w = weights[idx]
                 if G.has_edge(u, v):
-                    G[u][v]['weight'] = min(G[u][v]['weight'], w)
+                    G[u][v]["weight"] = min(G[u][v]["weight"], w)
                 else:
                     G.add_edge(u, v, weight=w)
         return G
@@ -201,16 +205,16 @@ def verify_geodesic_preservation(
 
     for u, v in pairs:
         try:
-            d_orig = nx.shortest_path_length(G_original, u, v, weight='weight')
+            d_orig = nx.shortest_path_length(G_original, u, v, weight="weight")
         except nx.NetworkXNoPath:
             unreachable_original += 1
             continue
 
         try:
-            d_back = nx.shortest_path_length(G_backbone, u, v, weight='weight')
+            d_back = nx.shortest_path_length(G_backbone, u, v, weight="weight")
         except nx.NetworkXNoPath:
             unreachable_backbone += 1
-            violations.append((u, v, d_orig, float('inf'), float('inf')))
+            violations.append((u, v, d_orig, float("inf"), float("inf")))
             continue
 
         diff = abs(d_orig - d_back)

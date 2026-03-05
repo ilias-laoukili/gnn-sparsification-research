@@ -1,6 +1,5 @@
 """Utility functions for metrics, logging, reproducibility, and visualization."""
 
-from .seeds import set_global_seed
 from .analysis import (
     compute_effects,
     compute_graph_stats,
@@ -8,6 +7,7 @@ from .analysis import (
     run_ablation_config,
 )
 from .reporting import print_text_table
+from .seeds import set_global_seed
 
 __all__ = [
     "set_global_seed",

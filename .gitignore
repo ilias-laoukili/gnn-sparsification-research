@@ -11,8 +11,7 @@ outputs/
 multirun/
 
 # Results that shouldn't be in git
-notebooks/results/
-!notebooks/results/.gitkeep
+results/
 
 # Weights & Biases
 wandb/
@@ -57,9 +56,30 @@ notebooks/tutorials
 *.swo
 *~
 
+# --- LaTeX Build Artifacts ---
+*.aux
+*.fdb_latexmk
+*.fls
+*.nav
+*.snm
+*.synctex.gz
+*.toc
+presentation/*.log
+presentation/*.out
+report/*.log
+report/*.out
+presentation/*.pdf
+report/*.pdf
+
+# --- Presentation Generated Files ---
+presentation/laplacian_frames/
+
 # --- Logs ---
 *.log
 logs/
+
+# --- Kaggle upload artifacts ---
+*.zip
 
 # --- Testing & Coverage ---
 .coverage
@@ -69,3 +89,4 @@ htmlcov/
 .pytest_cache/
 .tox/
 .hypothesis/
+.claude/

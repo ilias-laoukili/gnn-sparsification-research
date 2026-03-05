@@ -1,9 +1,10 @@
 """Training utilities for GNN models with early stopping."""
 
-from typing import Callable, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
+from sklearn.metrics import f1_score, precision_score, recall_score
 from torch import Tensor, nn
 from torch.optim import Optimizer
 from torch_geometric.data import Data
@@ -131,6 +132,28 @@ class GNNTrainer:
         correct = (pred[mask] == data.y[mask]).sum()
         return (correct / mask.sum()).item()
 
+    @torch.no_grad()
+    def compute_metrics(
+        self, data: Data, mask: Tensor, edge_weight: Optional[Tensor] = None
+    ) -> Dict[str, float]:
+        """Compute accuracy, macro-F1, macro-precision, macro-recall on masked nodes."""
+        self.model.eval()
+        out = self.model(data, edge_weight=edge_weight)
+        pred = out.argmax(dim=1)
+
+        y_true = data.y[mask].cpu().numpy()
+        y_pred = pred[mask].cpu().numpy()
+
+        correct = (pred[mask] == data.y[mask]).sum()
+        acc = (correct / mask.sum()).item()
+
+        return {
+            "accuracy": acc,
+            "macro_f1": f1_score(y_true, y_pred, average="macro", zero_division=0),
+            "macro_precision": precision_score(y_true, y_pred, average="macro", zero_division=0),
+            "macro_recall": recall_score(y_true, y_pred, average="macro", zero_division=0),
+        }
+
     def train(
         self,
         data: Data,
@@ -158,12 +181,22 @@ class GNNTrainer:
         self.history = {"train_loss": [], "val_acc": []}
         stopper = EarlyStopper(patience=patience) if patience else None
 
+        best_val_acc = -1.0
+        best_state: Optional[dict] = None
+        # Unwrap torch.compile wrapper so state_dict / load_state_dict work
+        # regardless of whether the model was compiled.
+        _base_model = getattr(self.model, "_orig_mod", self.model)
+
         for epoch in range(epochs):
             loss = self._train_step(data, edge_weight)
             val_acc = self._evaluate(data, data.val_mask, edge_weight)
 
             self.history["train_loss"].append(loss)
             self.history["val_acc"].append(val_acc)
+
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+                best_state = {k: v.clone() for k, v in _base_model.state_dict().items()}
 
             if verbose and (epoch + 1) % 10 == 0:
                 print(f"Epoch {epoch+1:3d} | Loss: {loss:.4f} | Val Acc: {val_acc:.4f}")
@@ -173,8 +206,14 @@ class GNNTrainer:
                     print(f"Early stopping at epoch {epoch+1}")
                 break
 
+        # Restore the weights from the epoch with the best validation accuracy.
+        # Without this, compute_metrics() would evaluate the model at its final
+        # (potentially degraded) state rather than its peak state.
+        if best_state is not None:
+            _base_model.load_state_dict(best_state)
+
         self.history["epochs_trained"] = epoch + 1
-        self.history["best_val_acc"] = max(self.history["val_acc"])
+        self.history["best_val_acc"] = best_val_acc
 
         return self.history
 
@@ -197,7 +236,7 @@ class GNNTrainer:
         patience: Optional[int] = None,
         edge_weight: Optional[Tensor] = None,
     ) -> Tuple[float, dict]:
-        """Convenience method to train and return test accuracy.
+        """Convenience method to train and return test metrics.
 
         Args:
             data: PyG Data object with all masks.
@@ -207,7 +246,10 @@ class GNNTrainer:
 
         Returns:
             Tuple of (test_accuracy, training_history).
+            History includes 'test_metrics' dict with accuracy, macro_f1,
+            macro_precision, macro_recall.
         """
         history = self.train(data, epochs, patience, edge_weight=edge_weight)
-        test_acc = self.evaluate(data, edge_weight=edge_weight)
-        return test_acc, history
+        metrics = self.compute_metrics(data, data.test_mask, edge_weight=edge_weight)
+        history["test_metrics"] = metrics
+        return metrics["accuracy"], history

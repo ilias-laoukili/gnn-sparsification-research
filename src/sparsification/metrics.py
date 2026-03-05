@@ -6,11 +6,12 @@ for memory efficiency on large graphs.
 """
 
 from typing import Dict, Optional, Tuple
+
+import networkx as nx
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from numpy.typing import NDArray
-import networkx as nx
 
 
 def calculate_jaccard_scores(adj: sp.csr_matrix) -> NDArray[np.float64]:
@@ -98,15 +99,13 @@ def calculate_adamic_adar_scores(adj: sp.csr_matrix) -> NDArray[np.float64]:
     adj_binary = (adj > 0).astype(np.float64)
     degrees = np.asarray(adj_binary.sum(axis=1)).flatten()
 
-    # **FIX:** Use log(degree + 1) to avoid log(1) = 0 and division by zero
-    # This handles degree-1 nodes gracefully
+    # Use log(degree + 1) to avoid log(1) = 0 for degree-1 nodes
+    # Add small epsilon to handle isolated nodes (degree 0) where log(1) = 0
     log_degrees = np.log(degrees + 1)
+    log_degrees = np.maximum(log_degrees, 1e-10)  # Avoid division by zero
 
     # Create diagonal matrix with 1/sqrt(log(deg+1))
     inv_sqrt_log = 1.0 / np.sqrt(log_degrees)
-
-    # Handle any remaining inf/nan from numerical errors
-    inv_sqrt_log[~np.isfinite(inv_sqrt_log)] = 0.0
 
     diag_weights = sp.diags(inv_sqrt_log, format="csr")
     weighted_adj = adj_binary @ diag_weights
@@ -253,8 +252,8 @@ def calculate_approx_effective_resistance_scores(
     D = sp.diags(degrees, format="csr")
     L = D - adj
 
-    # Add small regularization for numerical stability
-    L_reg = L + 1e-10 * sp.eye(n, format="csr")
+    # Add regularization for numerical stability (larger value to avoid CG warnings)
+    L_reg = L + 1e-6 * sp.eye(n, format="csr")
 
     # Construct sparse incidence matrix B (n × m)
     # For edge i connecting (u, v): B[u, i] = +1, B[v, i] = -1
@@ -276,18 +275,87 @@ def calculate_approx_effective_resistance_scores(
     Y = B @ R
 
     # Solve L @ Z = Y using sparse CG, giving Z = L^+ @ B @ R
+    # Suppress numerical warnings from CG solver on ill-conditioned systems
+    import warnings
+
     Z = np.zeros((n, k), dtype=np.float64)
-    for i in range(k):
-        z, _ = spla.cg(L_reg, Y[:, i], maxiter=max_cg_iters, rtol=cg_tol)
-        Z[:, i] = z
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        for i in range(k):
+            z, info = spla.cg(L_reg, Y[:, i], maxiter=max_cg_iters, rtol=cg_tol)
+            # If CG failed to converge, replace NaNs with zeros
+            if info != 0 or np.any(np.isnan(z)):
+                z = np.nan_to_num(z, nan=0.0, posinf=0.0, neginf=0.0)
+            Z[:, i] = z
 
     # Compute effective resistance: R_eff(u,v) ≈ ||Z[u] - Z[v]||²
     diff = Z[all_rows] - Z[all_cols]
     r_eff = np.sum(diff**2, axis=1)
 
-    # Ensure positive values
+    # Replace any remaining NaN/inf and ensure positive values
+    r_eff = np.nan_to_num(r_eff, nan=1e-10, posinf=1e-10, neginf=1e-10)
     r_eff = np.maximum(r_eff, 1e-10)
     return r_eff.astype(np.float64)
+
+
+def calculate_feature_cosine_scores(
+    adj: sp.csr_matrix,
+    features: np.ndarray,
+) -> NDArray[np.float64]:
+    """Compute cosine similarity between node features for all edges.
+
+    WHY THIS METRIC:
+    Structural metrics like Jaccard and Adamic-Adar measure neighborhood
+    overlap — they capture graph topology but completely ignore node features.
+    GNNs, however, aggregate FEATURE vectors along edges. An edge connecting
+    two nodes with very different features contributes noisy signal during
+    message passing.
+
+    Feature cosine similarity directly measures how aligned two connected
+    nodes' feature vectors are. On homophilous graphs (where connected
+    nodes tend to share labels), high-cosine edges connect same-class
+    nodes and are "useful" for classification. On heterophilous graphs,
+    the relationship is inverted, but cosine still captures whether the
+    edge carries redundant vs. novel information.
+
+    This metric is complementary to structural metrics:
+    - Jaccard says "these nodes share many neighbors" (structural redundancy)
+    - Feature cosine says "these nodes have similar features" (feature alignment)
+    An edge can be structurally important (high Jaccard) but feature-misaligned
+    (low cosine), or vice versa.
+
+    HOW IT WORKS:
+    1. L2-normalize each node's feature vector.
+    2. For each edge (u, v), compute dot product of normalized features.
+    3. Clamp to [0, 1] (negative cosine → 0, treating as "no similarity").
+
+    Complexity: O(E * d) where d is the feature dimension.
+
+    Args:
+        adj: Sparse adjacency matrix in CSR format.
+        features: Node feature matrix of shape (num_nodes, num_features).
+
+    Returns:
+        Array of cosine similarity scores for each edge, ordered by CSR indices.
+        Shape: (num_edges,). Values in [0, 1].
+    """
+    # L2-normalize rows: each node's feature becomes a unit vector.
+    # This makes dot product = cosine similarity.
+    norms = np.linalg.norm(features, axis=1, keepdims=True)
+    norms = np.maximum(norms, 1e-10)  # avoid division by zero for zero-feature nodes
+    normalized = features / norms
+
+    rows, cols = adj.nonzero()
+
+    # Vectorized dot product for all edges at once: sum of element-wise products
+    scores = np.sum(normalized[rows] * normalized[cols], axis=1)
+
+    # Clamp negatives to 0: we treat negative cosine as "no similarity"
+    # rather than "anti-similarity", since we want a [0,1] score range
+    # consistent with Jaccard/AA.
+    scores = np.maximum(scores, 0.0)
+
+    return scores.astype(np.float64)
 
 
 def compute_geodesic_preservation(
@@ -412,19 +480,34 @@ def compute_topology_metrics(adj: sp.csr_matrix) -> Dict:
     algebraic_connectivity = 0.0
     if num_components == 1 and n > 1:
         try:
-            algebraic_connectivity = nx.algebraic_connectivity(G, method='tracemin_lu')
+            algebraic_connectivity = nx.algebraic_connectivity(G, method="tracemin_lu")
         except Exception:
             # Fall back to computing from Laplacian eigenvalues
             try:
                 L = nx.laplacian_matrix(G).astype(np.float64)
                 # Get second smallest eigenvalue
-                eigenvalues = spla.eigsh(L, k=min(2, n-1), which='SM', return_eigenvectors=False)
-                algebraic_connectivity = float(sorted(eigenvalues)[1]) if len(eigenvalues) > 1 else 0.0
+                eigenvalues = spla.eigsh(L, k=min(2, n - 1), which="SM", return_eigenvectors=False)
+                algebraic_connectivity = (
+                    float(sorted(eigenvalues)[1]) if len(eigenvalues) > 1 else 0.0
+                )
             except Exception:
                 algebraic_connectivity = 0.0
     elif num_components > 1:
-        # For disconnected graphs, algebraic connectivity is 0
-        algebraic_connectivity = 0.0
+        # For disconnected graphs, compute on the largest connected component
+        largest_cc = max(components, key=len)
+        if len(largest_cc) > 1:
+            subgraph = G.subgraph(largest_cc)
+            try:
+                algebraic_connectivity = nx.algebraic_connectivity(subgraph, method="tracemin_lu")
+            except Exception:
+                try:
+                    L = nx.laplacian_matrix(subgraph).astype(np.float64)
+                    eigenvalues = spla.eigsh(L, k=2, which="SM", return_eigenvectors=False)
+                    algebraic_connectivity = (
+                        float(sorted(eigenvalues)[1]) if len(eigenvalues) > 1 else 0.0
+                    )
+                except Exception:
+                    algebraic_connectivity = 0.0
 
     return {
         "num_nodes": n,
@@ -460,22 +543,30 @@ def compute_topology_preservation(
     sparse_metrics = compute_topology_metrics(sparse_adj)
 
     # Edge retention
-    edge_retention = sparse_metrics["num_edges"] / orig_metrics["num_edges"] if orig_metrics["num_edges"] > 0 else 0.0
+    edge_retention = (
+        sparse_metrics["num_edges"] / orig_metrics["num_edges"]
+        if orig_metrics["num_edges"] > 0
+        else 0.0
+    )
 
     # Clustering preservation
     clustering_preservation = (
         sparse_metrics["clustering_coefficient"] / orig_metrics["clustering_coefficient"]
-        if orig_metrics["clustering_coefficient"] > 0 else 1.0
+        if orig_metrics["clustering_coefficient"] > 0
+        else 1.0
     )
 
     # Algebraic connectivity preservation
     connectivity_preservation = (
         sparse_metrics["algebraic_connectivity"] / orig_metrics["algebraic_connectivity"]
-        if orig_metrics["algebraic_connectivity"] > 0 else 0.0
+        if orig_metrics["algebraic_connectivity"] > 0
+        else 0.0
     )
 
     # Component change
-    component_change = sparse_metrics["num_connected_components"] - orig_metrics["num_connected_components"]
+    component_change = (
+        sparse_metrics["num_connected_components"] - orig_metrics["num_connected_components"]
+    )
 
     return {
         "edge_retention": edge_retention,

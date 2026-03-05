@@ -1,147 +1,152 @@
 # Graph Sparsification for Graph Neural Networks
 
 ![Status](https://img.shields.io/badge/Status-In%20Development-blue)
-![Python](https://img.shields.io/badge/Python-3.8%2B-green)
+![Python](https://img.shields.io/badge/Python-3.10%2B-green)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red)
-![License](https://img.shields.io/badge/License-MIT%20%2B%20CC--BY-lightgrey)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 ## Overview
 
-This project investigates graph sparsification methods for improving GNN efficiency while preserving accuracy. It focuses on **Metric Backbones** - a principled approach to edge pruning based on the Relaxed Triangle Inequality.
-
-### Features
-- Jaccard/Adamic-Adar similarity-based sparsification
-- Effective resistance (spectral) methods
-- Experiments on Cora, PubMed, Flickr datasets
-- Statistical analysis tools
-
-### How to Reproduce Results
-
-```bash
-# Option 1: Run notebooks (recommended for exploration)
-jupyter notebook notebooks/exploratory/
-
-# Option 2: Run automated experiments (reproducibility)
-bash scripts/reproduce_experiments.sh
-
-# Option 3: Run specific dataset/method
-bash scripts/reproduce_experiments.sh --dataset cora --method jaccard
-```
-
-## Introduction
-
-This repository contains the research work for the **Projet TREMPLIN RECHERCHE 2025/2026** at **Université Gustave Eiffel / LAMA**.
+This project investigates graph sparsification methods for improving GNN efficiency while preserving accuracy, as part of **Projet TREMPLIN RECHERCHE 2025/2026** at **Université Gustave Eiffel / LAMA**.
 
 **Tutor:** Maximilien Dreveton
 
-The primary goal of this project is to investigate the trade-off between Graph Neural Network (GNN) performance and computational efficiency by sparsifying graphs using various methods, specifically focusing on **Metric Backbones**. We aim to reduce the number of edges in the graph (compression) while maintaining high classification accuracy (performance).
+The central question: *can we remove a large fraction of edges from a graph before training a GNN, without significantly hurting accuracy — and can smart sparsification methods outperform random edge removal?*
 
-## Research Objectives
+We evaluate multiple sparsification strategies on both homophilic (citation) and heterophilic (Roman-empire) graphs, using GCN* (Luo et al., NeurIPS 2024) as the backbone model.
 
-- **Compare** different graph sparsification methods (Metric-based vs. Random baseline).
-- **Analyze** the impact of sparsification on GNN accuracy and training time.
-- **Identify** optimal sparsification ratios for different datasets (Citation vs. Social).
-- **Understand** the topological properties preserved by different metrics (Jaccard vs. Adamic-Adar).
-
-## Methodology
-
-We investigate multiple sparsification approaches based on the **Metric Backbone** framework (Relaxed Triangle Inequality):
-
-### 1. Jaccard Metric Backbone
-Used for citation networks (homophily-based). Edge weights are based on neighborhood overlap:
-$$d(u,v) = 1 - \frac{|N(u) \cap N(v)|}{|N(u) \cup N(v)|}$$
-
-### 2. Adamic-Adar Metric Backbone
-Used for social networks. Weights common neighbors by their rarity (inverse log degree):
-$$AA(u,v) = \sum_{z \in N(u) \cap N(v)} \frac{1}{\log(|N(z)|)}$$
-
-### 3. Effective Resistance (Spectral)
-Measures edge criticality based on electrical network analogy. High R_eff = bottleneck edge:
-$$R_{eff}(u,v) = L^+_{uu} + L^+_{vv} - 2L^+_{uv}$$
-
-**Two implementations available:**
-- **Exact** (`effective_resistance`): Dense O(N³) for small benchmarks (<5K nodes)
-- **Approximate** (`approx_er`): JLT-based O(m log n) for large graphs (>10K nodes)
-
-### 4. Random Baseline
-Random edge removal to establish a performance lower bound.
+---
 
 ## Project Structure
 
-```text
+```
 gnn-sparsification-research/
-├── notebooks/
-│   └── exploratory/      # Research experiments
-├── src/                  # Source code
-├── scripts/              # Training scripts
-├── configs/              # Hydra configs
-└── tests/                # Unit tests
+├── src/                          # Core library
+│   ├── data/                     # Dataset loading (26+ datasets via PyG)
+│   ├── models/                   # GCN, GraphSAGE, GAT, GCNStar
+│   ├── sparsification/           # Sparsification engine + metrics
+│   ├── training/                 # GNNTrainer with early stopping
+│   ├── experiments/              # Ablation study framework
+│   └── utils/                    # Seeds, analysis, reporting
+├── scripts/
+│   ├── run_ablation.py           # Ablation study — single dataset (CPU)
+│   ├── run_ablation_parallel.sh  # Ablation study — all datasets in parallel
+│   └── roman_empire_gpu.py       # Roman-empire experiment (GPU / Kaggle)
+├── notebooks/exploratory/
+│   ├── 01_Dataset_Loading_and_Preprocessing.ipynb
+│   ├── 02_Sparsification_Algorithm_Implementation.ipynb
+│   ├── 03_Effect_of_Sparsification_on_Topology.ipynb
+│   ├── 04_Ablation_Study_and_Visualization.ipynb
+│   └── 05_Roman_Empire_Analysis.ipynb
+├── tests/                        # Unit tests
+├── presentation/                 # LaTeX slides + figures
+└── report/                       # LaTeX research report
 ```
 
-## Reproducing Results
+---
 
-The research experiments are available as standalone Jupyter Notebooks. To replicate the findings:
+## Sparsification Methods
 
-### 1. Setup Environment
+### Threshold-based (keep top-k edges by score)
+| Method | Score | Notes |
+|--------|-------|-------|
+| **Jaccard-T** | Neighbourhood overlap | Good for homophilic graphs |
+| **AA-T** | Adamic-Adar (log-weighted overlap) | Penalises high-degree hubs |
+| **FeatCos-T** | Feature cosine similarity | Feature-aware, not topology-based |
+| **ApproxER-T** | Approximate effective resistance | Spectral, O(m log n) via JLT |
+| **Random** | Uniform random | Baseline lower bound |
+
+Each method also has an **inverse** variant (`-IT`: keep lowest-scoring edges) and a **weighted** variant (`-W`: use scores as edge weights during training).
+
+Additional variants: **sampled** (probabilistic proportional to score) and **degree-aware** (per-node minimum edge guarantee).
+
+### Metric Backbone
+Global edge pruning via the Relaxed Triangle Inequality — preserves geodesic distances. Implemented in `src/sparsification/metric_backbone.py`.
+
+---
+
+## Model: GCN* (NeurIPS 2024)
+
+We replicate **GCN\*** from *"Classic GNNs are Strong Baselines"* (Luo et al., NeurIPS 2024) exactly:
+
+```
+Input → Linear(300, 512) → 9 × [GCNConv + learned residual + BatchNorm + ReLU + Dropout(0.5)] → Linear(512, 18)
+```
+
+Hyperparameters (from paper): `hidden=512, layers=9, dropout=0.5, lr=1e-3, wd=0.0, epochs=2500`
+Paper result on Roman-empire: **91.27 ± 0.20%**
+
+---
+
+## Experiments
+
+### Notebooks (01–04): Understanding Sparsification
+
+The first four notebooks build up understanding of sparsification methods in general:
+
+1. **Dataset loading** — inspect graph statistics across 26+ datasets
+2. **Algorithm implementation** — implement and test Jaccard/AA metrics
+3. **Topological effects** — degree distribution, connectivity, clustering under sparsification
+4. **Ablation study** — four scenarios (Full+Binary, Sparse+Binary, Full+Weighted, Sparse+Weighted) on homophilic datasets
+
+### Notebook 05 + Script: Roman-empire Application
+
+Applies sparsification to Roman-empire, a challenging **heterophilic** graph (22,662 nodes, 65,854 edges, homophily ≈ 0.047, 18 classes).
+
+Run on GPU (Kaggle T4×2, ~3.5h for non-ApproxER methods):
+```bash
+# Session 1 — fast methods (~3.5h on T4×2)
+python scripts/roman_empire_gpu.py --skip-approxer
+
+# Session 2 — ApproxER methods (~8h on T4×2), after uploading session 1 results
+python scripts/roman_empire_gpu.py --approxer-only --resume
+```
+
+### Ablation Study (multi-dataset)
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Single dataset
+python scripts/run_ablation.py --dataset cora
+
+# All datasets in parallel waves
+bash scripts/run_ablation_parallel.sh
 ```
 
-### 2. Run Experiments
+---
 
-Launch Jupyter Lab or Notebook:
+## Setup
 
 ```bash
-jupyter notebook notebooks/exploratory/
+# Create environment
+python -m venv .venv
+source .venv/bin/activate
+
+# Install
+pip install -e ".[dev]"
 ```
 
-#### **Experiment 1: Small Scale Baseline (Cora)**
+Dependencies are declared in `pyproject.toml`. Key packages: `torch`, `torch-geometric`, `scikit-learn`, `numpy`, `pandas`, `scipy`.
 
-- **Notebook:** `01_exp_jaccard_sparsification_cora.ipynb`
-- **Method:** Jaccard Metric Backbone (Dense Matrix Implementation).
-- **Finding:** High compressibility. We can remove **~40%** of edges with negligible accuracy loss.
+---
 
-#### **Experiment 2: Scalability & Saturation (PubMed)**
+## Tests
 
-- **Notebook:** `02_exp_jaccard_sparsification_pubmed.ipynb`
-- **Method:** Sparse Tensor Algebra ($O(E)$ complexity).
-- **Finding:** Discovery of the **"Saturation Effect"**. Edge retention stabilizes at **~65%** regardless of the stretch factor $\alpha$, suggesting a rigid topological "Hard Core" in citation graphs.
+```bash
+pytest tests/
+```
 
-#### **Experiment 3: Social Networks & Optimization (Flickr)**
-
-- **Notebook:** `03_exp_adamic_adar_sparsification_flickr.ipynb`
-- **Method:** Adamic-Adar Metric Backbone.
-- **Engineering:** Achieved **1000x speedup** in metric computation using CPU-vectorized sparse operations (`scipy.sparse`) to enable processing 900k edges on consumer hardware (Mac M4) without OOM.
-
-## Results
-
-| Dataset | Type | Nodes | Edges | Metric | Key Insight |
-|---------|------|-------|-------|--------|-------------|
-| **Cora** | Citation | 2.7K | 5K | Jaccard | **High Redundancy:** 40% edges removed with <1% acc drop. |
-| **PubMed** | Citation | 19.7K | 44K | Jaccard | **Hard Core:** Sparsification saturates at 65% retention. |
-| **Flickr** | Social | 89K | 900K | Adamic-Adar | **Structure:** Adamic-Adar effectively prunes high-degree hubs. |
-
-### Effective Resistance Approximation Quality
-
-The JLT-based approximation preserves rankings with Spearman ρ ≈ 0.80:
-
-| Metric | Exact ER | Approx ER (ε=0.3) |
-|--------|----------|-------------------|
-| Time (Cora) | 2.6s | 40s |
-| Time (Flickr) | ∞ (OOM) | ~5 min |
-| Spearman ρ | 1.0 | 0.80 |
-| Top-10% overlap | 100% | 77% |
-
-**Note:** Approx ER is slower on small graphs but essential for large graphs where O(N³) is infeasible.
+---
 
 ## License
 
-Code is MIT licensed. See [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE) for details.
+
+---
 
 ## Acknowledgments
 
 - Université Gustave Eiffel / LAMA
 - Projet TREMPLIN RECHERCHE 2025/2026
 - Tutor: Maximilien Dreveton
+- Luo et al., *"Classic GNNs are Strong Baselines"*, NeurIPS 2024
+- Platonov et al., *"A Critical Look at the State of Self-Supervised Learning for Graphs"* (Roman-empire dataset)
