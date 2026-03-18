@@ -1,0 +1,91 @@
+# --- Data ---
+# Ignore data folder where datasets (Cora, PubMed) are downloaded
+data/
+raw/
+processed/
+notebooks/data/
+
+# --- Experiment Outputs ---
+# Hydra outputs
+outputs/
+multirun/
+
+# Results that shouldn't be in git
+results/
+
+# Weights & Biases
+wandb/
+*.wandb
+
+# Model checkpoints
+*.pt
+*.pth
+*.ckpt
+
+# --- System Files ---
+.DS_Store
+Thumbs.db
+.directory
+
+# --- Python & Environments ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+dist/
+build/
+
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+profile_default/
+ipython_config.py
+notebooks/tutorials
+
+# --- IDE Settings ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- LaTeX Build Artifacts ---
+*.aux
+*.fdb_latexmk
+*.fls
+*.nav
+*.snm
+*.synctex.gz
+*.toc
+presentation/*.log
+presentation/*.out
+report/*.log
+report/*.out
+presentation/*.pdf
+report/*.pdf
+
+# --- Presentation Generated Files ---
+presentation/laplacian_frames/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Kaggle upload artifacts ---
+*.zip
+
+# --- Testing & Coverage ---
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.tox/
+.hypothesis/
