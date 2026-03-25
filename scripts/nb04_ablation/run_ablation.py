@@ -12,9 +12,9 @@ Six experiment types, each answering a distinct question:
   5.  feature_metric    — Threshold using feature cosine similarity (feature-aware, not topology).
 
 Usage:
-    python scripts/run_ablation.py --all
-    python scripts/run_ablation.py --dataset cora
-    python scripts/run_ablation.py --list
+    python scripts/nb04_ablation/run_ablation.py --all
+    python scripts/nb04_ablation/run_ablation.py --dataset cora
+    python scripts/nb04_ablation/run_ablation.py --list
 """
 
 import argparse
@@ -23,7 +23,10 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+REPO_ROOT = Path(__file__).resolve()
+while not (REPO_ROOT / "src").is_dir():
+    REPO_ROOT = REPO_ROOT.parent
+sys.path.insert(0, str(REPO_ROOT))
 
 import pandas as pd
 import torch
@@ -43,7 +46,7 @@ SEEDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 DATASETS_NO_FEATURES = ["polblogs"]
 DATASETS_TOO_LARGE = ["flickr", "physics", "cs", "corafull", "ppi"]
 
-RESULTS_DIR = Path(__file__).parent.parent / "results" / "ablation"
+RESULTS_DIR = REPO_ROOT / "results" / "ablation"
 
 COMMON_TRAIN_KWARGS = dict(hidden_channels=64, epochs=200, patience=20)
 
@@ -92,7 +95,7 @@ def run_single_dataset_experiments(dataset_name: str, device: str, results_dir: 
 
     output_file = results_dir / f"{dataset_name}_results.csv"
 
-    loader = DatasetLoader(root=str(Path(__file__).parent.parent / "data"))
+    loader = DatasetLoader(root=str(REPO_ROOT / "data"))
     data, num_features, num_classes = loader.get_dataset(dataset_name, device)
     print(f"Loaded: {data.num_nodes:,} nodes, {data.edge_index.shape[1]:,} edges")
     print(f"Features: {num_features}, Classes: {num_classes}")

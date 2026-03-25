@@ -35,11 +35,11 @@
 # Total with max ~39 parallel: Sweep 1a ~4-6h, Sweep 1b ~2-3h, Sweeps 2+3 ~1-2h
 #
 # Usage:
-#   caffeinate -s bash scripts/run_synthetic_sweeps.sh > results/logs/synthetic_sweeps.log 2>&1 &
-#   caffeinate -s bash scripts/run_synthetic_sweeps.sh --resume > results/logs/synthetic_sweeps.log 2>&1 &
+#   caffeinate -s bash scripts/nb07_synthetic/run_synthetic_sweeps.sh > results/logs/synthetic_sweeps.log 2>&1 &
+#   caffeinate -s bash scripts/nb07_synthetic/run_synthetic_sweeps.sh --resume > results/logs/synthetic_sweeps.log 2>&1 &
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 # Use the project venv Python (has synth_graph_rs, torch-geometric, etc.)
 PYTHON="$(pwd)/.venv/bin/python"
@@ -56,8 +56,8 @@ run_synth() {
     local tag="h${h}_mu${mu}_gs${gs}${extra:+_$(echo "$extra" | tr ' =' '_' | tr -d '-')}"
     local logfile="$LOGDIR/synth_${tag}_${metric}.log"
     echo "[$(date '+%H:%M:%S')] START  h=$h mu=$mu gs=$gs $extra [$metric]"
-    # 90-min timeout guards against MPS deadlocks on very sparse graphs (use gtimeout on macOS)
-    gtimeout 5400 "$PYTHON" -u scripts/run_synthetic_hpo.py \
+    # 3h timeout guards against MPS deadlocks on very sparse graphs (use gtimeout on macOS)
+    gtimeout 10800 "$PYTHON" -u scripts/nb07_synthetic/run_synthetic_hpo.py \
         --h "$h" --mu "$mu" --graph_seed "$gs" --metric "$metric" \
         $extra $RESUME_FLAG \
         > "$logfile" 2>&1

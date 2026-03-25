@@ -33,15 +33,15 @@
 #   Reduce parallelism here if the machine runs out of memory.
 #
 # Usage:
-#   caffeinate -s bash scripts/run_hpo_robustness_parallel.sh > results/logs/hpo_run.log 2>&1 &
+#   caffeinate -s bash scripts/nb06_hpo_robustness/run_hpo_robustness_parallel.sh > results/logs/hpo_run.log 2>&1 &
 #
 # To resume after interruption (skips retention rates already in JSON):
-#   caffeinate -s bash scripts/run_hpo_robustness_parallel.sh --resume > results/logs/hpo_run.log 2>&1 &
+#   caffeinate -s bash scripts/nb06_hpo_robustness/run_hpo_robustness_parallel.sh --resume > results/logs/hpo_run.log 2>&1 &
 #
 # Per-dataset logs: results/logs/hpo_<dataset>_<metric>.log
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 # Use the project venv Python (has torch-geometric, etc.)
 PYTHON="$(pwd)/.venv/bin/python"
@@ -57,7 +57,7 @@ run_dataset() {
     local ds=$1
     local metric=$2
     echo "[$(date '+%H:%M:%S')] START  $ds  [$metric]"
-    "$PYTHON" -u scripts/run_hpo_robustness.py --dataset "$ds" --metric "$metric" $RESUME_FLAG \
+    "$PYTHON" -u scripts/nb06_hpo_robustness/run_hpo_robustness.py --dataset "$ds" --metric "$metric" $RESUME_FLAG \
         > "$LOGDIR/hpo_${ds}_${metric}.log" 2>&1
     local status=$?
     if [ $status -eq 0 ]; then

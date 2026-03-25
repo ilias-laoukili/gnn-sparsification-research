@@ -18,15 +18,15 @@ Estimated runtime on Kaggle T4×2:
 
 Usage:
   # On Kaggle — session 1 (fast methods):
-  !python scripts/roman_empire_gpu.py --skip-approxer
+  !python scripts/nb05_roman_empire/roman_empire_gpu.py --skip-approxer
 
   # On Kaggle — session 2 (upload CSV from session 1 first):
-  !python scripts/roman_empire_gpu.py --approxer-only --resume
+  !python scripts/nb05_roman_empire/roman_empire_gpu.py --approxer-only --resume
 
   # Locally with a GPU:
-  python scripts/roman_empire_gpu.py --skip-approxer
+  python scripts/nb05_roman_empire/roman_empire_gpu.py --skip-approxer
 
-  # Kaggle upload: zip src/ scripts/roman_empire_gpu.py results/roman_empire_results.csv
+  # Kaggle upload: zip src/ scripts/nb05_roman_empire/roman_empire_gpu.py results/roman_empire_results.csv
 """
 
 import argparse
@@ -46,7 +46,9 @@ from torch.optim import Adam
 from torch_geometric.data import Data
 
 # ── Repo root ─────────────────────────────────────────────────────────────────
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve()
+while not (REPO_ROOT / "src").is_dir():
+    REPO_ROOT = REPO_ROOT.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src import DatasetLoader, GNNTrainer, GraphSparsifier, get_model, set_global_seed

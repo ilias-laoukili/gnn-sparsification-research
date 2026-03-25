@@ -1,5 +1,6 @@
 """Utility functions for metrics, logging, reproducibility, and visualization."""
 
+from .device import get_device
 from .analysis import (
     compute_effects,
     compute_graph_stats,
@@ -16,4 +17,5 @@ __all__ = [
     "retention_to_numeric",
     "run_ablation_config",
     "print_text_table",
+    "get_device",
 ]

@@ -16,11 +16,11 @@ Output: results/hpo/synth_h{h}_mu{mu}_d{d}_c{c}_n{n}_gs{gs}[_arch_{arch}]_hpo_{m
         Same schema as real-dataset HPO results — NB06/NB07 loader works unchanged.
 
 Usage:
-    python scripts/run_synthetic_hpo.py --h 0.1 --mu 1.0 --metric jaccard
-    python scripts/run_synthetic_hpo.py --h 0.5 --mu 2.0 --metric random --graph_seed 1
-    python scripts/run_synthetic_hpo.py --h 0.1 --mu 1.0 --theta_exp 3.0 --metric approx_er
-    python scripts/run_synthetic_hpo.py --h 0.5 --metric jaccard --arch graphsage
-    python scripts/run_synthetic_hpo.py --h 0.5 --metric jaccard --use_edge_weights
+    python scripts/nb07_synthetic/run_synthetic_hpo.py --h 0.1 --mu 1.0 --metric jaccard
+    python scripts/nb07_synthetic/run_synthetic_hpo.py --h 0.5 --mu 2.0 --metric random --graph_seed 1
+    python scripts/nb07_synthetic/run_synthetic_hpo.py --h 0.1 --mu 1.0 --theta_exp 3.0 --metric approx_er
+    python scripts/nb07_synthetic/run_synthetic_hpo.py --h 0.5 --metric jaccard --arch graphsage
+    python scripts/nb07_synthetic/run_synthetic_hpo.py --h 0.5 --metric jaccard --use_edge_weights
 """
 
 import argparse
@@ -32,19 +32,28 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from scipy.stats.qmc import LatinHypercube
-from torch import nn
 from torch_geometric.data import Data
-from torch_geometric.nn import GATConv, GCNConv, SAGEConv
 from torch_geometric.utils import to_scipy_sparse_matrix
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve()
+while not (REPO_ROOT / "src").is_dir():
+    REPO_ROOT = REPO_ROOT.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from src.data.synthetic import build_csbm_graph, dataset_name
+from src.hpo.config import (
+    ALL_METRICS, BACKBONE_METRICS, DEGREE_AWARE_METRICS,
+    DO_MAX, DO_MIN, HIDDEN_CHOICES, INVERSE_METRICS,
+    LAYER_CHOICES, LR_MAX, LR_MIN, SAMPLED_METRICS,
+    SPARSIFIER_METRICS, WD_MAX, WD_MIN,
+)
+from src.models.flexible import FLEX_REGISTRY
 from src.sparsification.core import GraphSparsifier
 from src.sparsification.metrics import compute_topology_metrics
+from src.sparsification.random import precompute_random_scores, random_sparsify
 from src.training.trainer import GNNTrainer
+from src.utils.device import get_device
 
 # ── Experiment configuration ──────────────────────────────────────────────────
 
@@ -56,205 +65,10 @@ PATIENCE          = 50
 YIELD_THRESHOLD   = 0.90
 RANDOM_SCORE_SEED = 42
 
-# Standard threshold metrics (keep highest-scoring edges)
-SPARSIFIER_METRICS = ["jaccard", "adamic_adar", "approx_er", "feature_cosine"]
-# Inverse threshold metrics (keep lowest-scoring edges — for heterophilous graphs)
-INVERSE_METRICS    = ["jaccard_inv", "adamic_adar_inv", "approx_er_inv", "feature_cosine_inv"]
-# Metric backbone — retention ratio determined by graph structure, not a parameter
-BACKBONE_METRICS   = ["metric_backbone_jaccard", "metric_backbone_adamic_adar",
-                      "metric_backbone_approx_er"]
-# Degree-aware threshold: guarantees min edges per node before global threshold
-DEGREE_AWARE_METRICS = ["degree_aware_jaccard", "degree_aware_adamic_adar",
-                        "degree_aware_approx_er"]
-# Probabilistic sampling proportional to edge scores
-SAMPLED_METRICS    = ["sampled_jaccard", "sampled_adamic_adar", "sampled_approx_er"]
-
-ALL_METRICS = (SPARSIFIER_METRICS + INVERSE_METRICS + BACKBONE_METRICS
-               + DEGREE_AWARE_METRICS + SAMPLED_METRICS + ["random"])
-
-LR_MIN,  LR_MAX  = 1e-4, 1e-1
-WD_MIN,  WD_MAX  = 0.0,  5e-2
-DO_MIN,  DO_MAX  = 0.0,  0.9
-HIDDEN_CHOICES   = [8, 16, 32, 64, 128, 256]
-LAYER_CHOICES    = [1, 2, 3, 4]
-
 RESULTS_DIR = REPO_ROOT / "results" / "hpo"
 
-
-# ── cSBM graph generation ─────────────────────────────────────────────────────
-
-def build_csbm_graph(
-    h: float,
-    mu: float,
-    d: float,
-    n: int,
-    c: int,
-    f: int,
-    graph_seed: int,
-    theta_exp: float | None,
-    device: str,
-) -> tuple[Data, float]:
-    """Generate a cSBM graph and return (PyG Data, effective_h)."""
-    try:
-        import synth_graph_rs
-    except ImportError:
-        raise ImportError(
-            "synth-graph-rs is not installed. "
-            "Run: cd /path/to/synth-graph-rs && maturin develop --release"
-        )
-
-    kwargs = dict(
-        n=n, c=c, h=h, d=d, f=f, mu=mu,
-        ensure_connected=True,
-        seed=graph_seed,
-    )
-    if theta_exp is not None:
-        kwargs["theta_exponent"] = theta_exp
-
-    edge_index_np, x_np, y_np, effective_h = synth_graph_rs.generate_csbm(**kwargs)
-
-    edge_index = torch.from_numpy(edge_index_np).long()
-    x          = torch.from_numpy(x_np).float()
-    y          = torch.from_numpy(y_np).long()
-
-    train_mask = torch.zeros(n, dtype=torch.bool)
-    val_mask   = torch.zeros(n, dtype=torch.bool)
-    test_mask  = torch.zeros(n, dtype=torch.bool)
-
-    rng = np.random.default_rng(graph_seed + 1000)
-    for cls in range(c):
-        idx = np.where(y_np == cls)[0]
-        rng.shuffle(idx)
-        n_train = min(20, len(idx) // 3)
-        n_rest  = len(idx) - n_train
-        n_val   = n_rest // 2
-        train_mask[idx[:n_train]]                   = True
-        val_mask[idx[n_train:n_train + n_val]]      = True
-        test_mask[idx[n_train + n_val:]]            = True
-
-    data = Data(x=x, edge_index=edge_index, y=y,
-                train_mask=train_mask, val_mask=val_mask, test_mask=test_mask)
-    data = data.to(device)
-    return data, float(effective_h)
-
-
-def dataset_name(h: float, mu: float, d: float, c: int, n: int,
-                 graph_seed: int, theta_exp: float | None, arch: str) -> str:
-    base = f"synth_h{h:.2f}_mu{mu:.2f}_d{d:.1f}_c{c}_n{n}_gs{graph_seed}"
-    if theta_exp is not None:
-        base += f"_te{theta_exp:.1f}"
-    if arch != "gcn":
-        base += f"_arch_{arch}"
-    return base
-
-
-# ── Flexible model definitions ────────────────────────────────────────────────
-
-class FlexibleGCN(nn.Module):
-    """Variable-depth GCN with configurable hidden size and dropout."""
-    def __init__(self, in_channels, hidden_channels, out_channels,
-                 num_layers, dropout):
-        super().__init__()
-        self.dropout = dropout
-        self.convs   = nn.ModuleList()
-        if num_layers == 1:
-            self.convs.append(GCNConv(in_channels, out_channels))
-        else:
-            self.convs.append(GCNConv(in_channels, hidden_channels))
-            for _ in range(num_layers - 2):
-                self.convs.append(GCNConv(hidden_channels, hidden_channels))
-            self.convs.append(GCNConv(hidden_channels, out_channels))
-
-    def reset_parameters(self):
-        for conv in self.convs:
-            conv.reset_parameters()
-
-    def forward(self, data, edge_weight=None):
-        x, edge_index = data.x, data.edge_index
-        for conv in self.convs[:-1]:
-            x = conv(x, edge_index, edge_weight=edge_weight)
-            x = F.relu(x)
-            x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.convs[-1](x, edge_index, edge_weight=edge_weight)
-        return F.log_softmax(x, dim=1)
-
-
-class FlexibleSAGE(nn.Module):
-    """Variable-depth GraphSAGE with mean aggregation."""
-    def __init__(self, in_channels, hidden_channels, out_channels,
-                 num_layers, dropout):
-        super().__init__()
-        self.dropout = dropout
-        self.convs   = nn.ModuleList()
-        if num_layers == 1:
-            self.convs.append(SAGEConv(in_channels, out_channels))
-        else:
-            self.convs.append(SAGEConv(in_channels, hidden_channels))
-            for _ in range(num_layers - 2):
-                self.convs.append(SAGEConv(hidden_channels, hidden_channels))
-            self.convs.append(SAGEConv(hidden_channels, out_channels))
-
-    def reset_parameters(self):
-        for conv in self.convs:
-            conv.reset_parameters()
-
-    def forward(self, data, edge_weight=None):
-        # SAGEConv uses mean aggregation; edge_weight is ignored
-        x, edge_index = data.x, data.edge_index
-        for conv in self.convs[:-1]:
-            x = conv(x, edge_index)
-            x = F.relu(x)
-            x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.convs[-1](x, edge_index)
-        return F.log_softmax(x, dim=1)
-
-
-class FlexibleGAT(nn.Module):
-    """Variable-depth GAT with multi-head attention (heads=2 on hidden layers)."""
-    def __init__(self, in_channels, hidden_channels, out_channels,
-                 num_layers, dropout, heads=2):
-        super().__init__()
-        self.dropout = dropout
-        self.convs   = nn.ModuleList()
-        if num_layers == 1:
-            self.convs.append(
-                GATConv(in_channels, out_channels, heads=1, concat=False, dropout=dropout)
-            )
-        else:
-            self.convs.append(
-                GATConv(in_channels, hidden_channels, heads=heads, dropout=dropout)
-            )
-            for _ in range(num_layers - 2):
-                self.convs.append(
-                    GATConv(hidden_channels * heads, hidden_channels,
-                            heads=heads, dropout=dropout)
-                )
-            self.convs.append(
-                GATConv(hidden_channels * heads, out_channels,
-                        heads=1, concat=False, dropout=dropout)
-            )
-
-    def reset_parameters(self):
-        for conv in self.convs:
-            conv.reset_parameters()
-
-    def forward(self, data, edge_weight=None):
-        # GAT learns attention internally; edge_weight ignored
-        x, edge_index = data.x, data.edge_index
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        for conv in self.convs[:-1]:
-            x = conv(x, edge_index)
-            x = F.elu(x)
-            x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.convs[-1](x, edge_index)
-        return F.log_softmax(x, dim=1)
-
-
-ARCH_REGISTRY = {
-    "gcn":       FlexibleGCN,
-    "graphsage": FlexibleSAGE,
-    "gat":       FlexibleGAT,
-}
+# ARCH_REGISTRY — use FLEX_REGISTRY minus 'mlp' (not used in this script)
+ARCH_REGISTRY = {k: v for k, v in FLEX_REGISTRY.items() if k != "mlp"}
 
 
 # ── Memory profiling ──────────────────────────────────────────────────────────
@@ -298,35 +112,6 @@ def _topology_meta(sparse_data: Data) -> dict:
             "algebraic_connectivity": float("nan"),
             "num_components":         float("nan"),
         }
-
-
-# ── Helper: random sparsification ─────────────────────────────────────────────
-
-def _precompute_random_scores(data):
-    ei  = data.edge_index.cpu().numpy()
-    src, dst = ei[0], ei[1]
-    n   = data.num_nodes
-    u   = np.minimum(src, dst)
-    v   = np.maximum(src, dst)
-    keys = u.astype(np.int64) * (n + 1) + v.astype(np.int64)
-    _, inverse_idx    = np.unique(keys, return_inverse=True)
-    n_undirected      = int(inverse_idx.max()) + 1
-    rng               = np.random.default_rng(RANDOM_SCORE_SEED)
-    undirected_scores = rng.random(n_undirected)
-    return undirected_scores, inverse_idx
-
-
-def _random_sparsify(data, undirected_scores, inverse_idx, retention_ratio, device):
-    if retention_ratio == 1.0:
-        return data.clone()
-    n_undirected = len(undirected_scores)
-    n_keep       = max(1, int(n_undirected * retention_ratio))
-    keep_undir   = np.zeros(n_undirected, dtype=bool)
-    keep_undir[np.argsort(undirected_scores)[-n_keep:]] = True
-    mask         = keep_undir[inverse_idx]
-    sparse       = data.clone()
-    sparse.edge_index = data.edge_index[:, mask].to(device)
-    return sparse
 
 
 # ── HP sampling ───────────────────────────────────────────────────────────────
@@ -452,15 +237,7 @@ def _checkpoint(path, ds_name, metric, num_features, num_classes,
 # ── Sparsification dispatch ───────────────────────────────────────────────────
 
 def _parse_composite_metric(metric: str) -> tuple[str, str]:
-    """Return (strategy, base_metric) for composite metric names.
-
-    E.g. 'degree_aware_jaccard' → ('degree_aware', 'jaccard')
-         'metric_backbone_approx_er' → ('metric_backbone', 'approx_er')
-         'sampled_adamic_adar' → ('sampled', 'adamic_adar')
-         'jaccard' → ('threshold', 'jaccard')
-         'jaccard_inv' → ('inverse', 'jaccard')
-         'random' → ('random', 'random')
-    """
+    """Return (strategy, base_metric) for composite metric names."""
     for prefix in ("metric_backbone_", "degree_aware_", "sampled_"):
         if metric.startswith(prefix):
             return prefix.rstrip("_"), metric[len(prefix):]
@@ -473,22 +250,17 @@ def _parse_composite_metric(metric: str) -> tuple[str, str]:
 
 def _build_sparsify_fn(metric: str, data: Data, device: str,
                        use_edge_weights: bool):
-    """Return (preprocess_time_s, _sparsify_fn, edge_scores_or_None, is_backbone).
-
-    For backbone metrics the returned fn ignores `r` and always returns the
-    backbone graph.  Callers should detect `is_backbone=True` and skip the
-    standard retention-rate loop, running the backbone separately.
-    """
+    """Return (preprocess_time_s, _sparsify_fn, edge_scores_or_None, is_backbone)."""
     strategy, base = _parse_composite_metric(metric)
 
     t0 = time.time()
     if strategy == "random":
-        undirected_scores, inverse_idx = _precompute_random_scores(data)
+        undirected_scores, inverse_idx = precompute_random_scores(data, seed=RANDOM_SCORE_SEED)
         preprocess_time = time.time() - t0
         scores_for_weights = None
 
         def _sparsify(r):
-            return _random_sparsify(data, undirected_scores, inverse_idx, r, device)
+            return random_sparsify(data, undirected_scores, inverse_idx, r, device)
 
         return preprocess_time, _sparsify, scores_for_weights, False
 
@@ -517,7 +289,6 @@ def _build_sparsify_fn(metric: str, data: Data, device: str,
         def _sparsify(r):
             return sparsifier.sparsify_sampled(base, r)
     elif strategy == "metric_backbone":
-        # Backbone ignores r — will be handled separately after the main loop
         def _sparsify(r):
             sparse_data, _ = sparsifier.sparsify_metric_backbone(base)
             return sparse_data
@@ -592,7 +363,6 @@ def run_synthetic(
         dense_std = results["1.0"]["robustness_stats"]["acc_std"]
 
     # ── Standard retention-rate loop ──────────────────────────────────────────
-    # For backbone metrics: only run r=1.0 (dense baseline); backbone handled below
     rates_to_run = [1.0] if is_backbone else RETENTION_RATES
 
     for r in sorted(rates_to_run, reverse=True):
@@ -615,7 +385,6 @@ def run_synthetic(
         # Edge weights for this retention ratio (threshold on scores, GCN only)
         ew = None
         if use_edge_weights and edge_scores is not None and arch == "gcn":
-            # Build a mask matching the sparsified edge_index
             full_ei   = data.edge_index.cpu()
             sparse_ei = sparse_data.edge_index.cpu()
             full_set  = {(int(full_ei[0, i]), int(full_ei[1, i])): i
@@ -756,14 +525,6 @@ def run_synthetic(
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
-
-def get_device() -> str:
-    if torch.cuda.is_available():
-        return "cuda"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(

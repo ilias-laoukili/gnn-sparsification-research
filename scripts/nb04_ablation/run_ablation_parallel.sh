@@ -3,12 +3,12 @@
 # Each dataset writes its own results/<dataset>_results.csv — no file conflicts.
 #
 # Usage:
-#   caffeinate -s bash scripts/run_parallel.sh > results/run_log.txt 2>&1 &
+#   caffeinate -s bash scripts/nb04_ablation/run_ablation_parallel.sh > results/run_log.txt 2>&1 &
 #
 # Per-dataset logs: results/logs/<dataset>.log
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 LOGDIR="results/logs"
 mkdir -p "$LOGDIR"
@@ -16,7 +16,7 @@ mkdir -p "$LOGDIR"
 run_dataset() {
     local ds=$1
     echo "[$(date '+%H:%M:%S')] START  $ds"
-    python -u scripts/run_ablation.py --dataset "$ds" \
+    python -u scripts/nb04_ablation/run_ablation.py --dataset "$ds" \
         > "$LOGDIR/${ds}.log" 2>&1
     local status=$?
     if [ $status -eq 0 ]; then

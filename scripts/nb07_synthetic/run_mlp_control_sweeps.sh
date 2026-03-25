@@ -16,15 +16,15 @@
 # Total runtime: ~8-12h with 3 parallel jobs per h-value (one h at a time per arch group)
 #
 # Usage:
-#   caffeinate -s bash scripts/run_mlp_control_sweeps.sh \
+#   caffeinate -s bash scripts/nb07_synthetic/run_mlp_control_sweeps.sh \
 #       > results/logs/mlp_control.log 2>&1 &
 #
 #   # Resume interrupted run:
-#   caffeinate -s bash scripts/run_mlp_control_sweeps.sh --resume \
+#   caffeinate -s bash scripts/nb07_synthetic/run_mlp_control_sweeps.sh --resume \
 #       > results/logs/mlp_control.log 2>&1 &
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 PYTHON="$(pwd)/.venv/bin/python"
 RESUME_FLAG="${1:-}"
@@ -54,7 +54,7 @@ run_mlp_control() {
     local arch=$3
     local logfile="$LOGDIR/mlp_control_${arch}_h${h}_gs${gs}.log"
     echo "[$(date '+%H:%M:%S')] START  arch=$arch  h=$h  gs=$gs"
-    "$PYTHON" -u scripts/run_mlp_control_sweep.py \
+    "$PYTHON" -u scripts/nb07_synthetic/run_mlp_control_sweep.py \
         --h "$h" --graph_seed "$gs" --arch "$arch" $RESUME_FLAG \
         > "$logfile" 2>&1
     local status=$?
